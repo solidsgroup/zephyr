@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import getpass
 import glob
 import hashlib
 import json
@@ -13,6 +12,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -20,7 +20,7 @@ from typing import Any
 
 from . import __version__
 from .alamo import ThermoTail, derived_status, metadata_digest, metadata_values
-from .client import ApiError, Client
+from .client import ApiError, Client, api_request
 from .config import ConfigError, Credentials, normalize_server_url
 from .workspace import RunMarker, WorkspaceError
 
@@ -50,8 +50,80 @@ def scheduler_job_id() -> str | None:
     return None
 
 
+def device_login(server: str, device_name: str | None = None) -> Credentials:
+    server = normalize_server_url(server)
+    flow = api_request(
+        server,
+        "POST",
+        "/auth/device",
+        {"device_name": (device_name or socket.gethostname())[:100]},
+    )
+    try:
+        verification_url = str(flow["verification_url"])
+        device_code = str(flow["device_code"])
+        expires_in = int(flow["expires_in"])
+        interval = max(int(flow["interval"]), 1)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiError("Zephyr returned an invalid device-login response") from error
+
+    print("Open this URL in a browser to connect zph:")
+    print(f"  {verification_url}")
+    print("Attempting to open it automatically; copy the URL if no browser appears.")
+    try:
+        webbrowser.open(verification_url)
+    except (OSError, webbrowser.Error):
+        pass
+    print("Waiting for browser login…", flush=True)
+
+    deadline = time.monotonic() + expires_in
+    while time.monotonic() < deadline:
+        result = api_request(
+            server,
+            "POST",
+            "/auth/device/token",
+            {"device_code": device_code},
+        )
+        state = result.get("status") if isinstance(result, dict) else None
+        if state == "approved":
+            token = result.get("token")
+            if not isinstance(token, str) or not token:
+                raise ApiError("Zephyr approved the login without returning a token")
+            credentials = Credentials(server=server, token=token)
+            user = Client(credentials).request("GET", "/auth/me")["user"]
+            credentials.save()
+            print(f"Authenticated as {user['email']} at {server}")
+            return credentials
+        if state in {"expired", "consumed"}:
+            raise ConfigError(f"Device login was {state}; run `zph login {server}` again")
+        if state != "pending":
+            raise ApiError("Zephyr returned an invalid device-login status")
+        time.sleep(interval)
+    raise ConfigError(f"Device login expired; run `zph login {server}` again")
+
+
+def credentials_for_server(
+    server: str | None = None,
+    *,
+    login_if_missing: bool = False,
+) -> Credentials:
+    requested = normalize_server_url(server) if server else None
+    try:
+        credentials = Credentials.load()
+    except ConfigError:
+        if requested and login_if_missing:
+            return device_login(requested)
+        raise
+    if requested and credentials.server != requested:
+        if login_if_missing:
+            return device_login(requested)
+        raise ConfigError(
+            f"zph is connected to {credentials.server}, not the requested server {requested}"
+        )
+    return credentials
+
+
 def client_for_workspace(directory: Path | None = None) -> tuple[Client, RunMarker | None]:
-    credentials = Credentials.load()
+    credentials = credentials_for_server()
     marker = RunMarker.load(directory) if directory is not None else None
     if marker and marker.server.rstrip("/") != credentials.server.rstrip("/"):
         raise WorkspaceError(
@@ -99,15 +171,22 @@ def import_directory(
 
 def cmd_login(args: argparse.Namespace) -> None:
     server = normalize_server_url(args.server)
-    token = args.token
-    if not token:
-        settings_url = f"{server}/settings/tokens?cli=1"
-        print(f"Opening {settings_url}")
-        webbrowser.open(settings_url)
-        token = getpass.getpass("Paste the new zph token: ").strip()
-    if not token:
-        raise ConfigError("No API token was supplied")
-    credentials = Credentials(server=server, token=token)
+    if not args.token:
+        try:
+            existing = Credentials.load()
+        except ConfigError:
+            existing = None
+        if existing is not None and existing.server == server:
+            try:
+                user = Client(existing).request("GET", "/auth/me")["user"]
+            except (ApiError, KeyError, TypeError):
+                pass
+            else:
+                print(f"Already authenticated as {user['email']} at {server}")
+                return
+        device_login(server, args.name)
+        return
+    credentials = Credentials(server=server, token=args.token)
     user = Client(credentials).request("GET", "/auth/me")["user"]
     credentials.save()
     print(f"Authenticated as {user['email']} at {server}")
@@ -182,38 +261,53 @@ def post_terminal(
                 time.sleep(2**attempt)
 
 
+def final_watch_status(directory: Path, last_status: str) -> str:
+    _, values = read_metadata(directory)
+    metadata_status, _ = derived_status(values)
+    if metadata_status in {"completed", "failed"}:
+        return metadata_status
+    if last_status in {"completed", "failed"}:
+        return last_status
+    return "interrupted"
+
+
 def cmd_watch(args: argparse.Namespace) -> None:
     directory = Path(args.directory).resolve()
+    requested_server = args.server or os.environ.get("ZEPHYR_SERVER")
+    credentials = credentials_for_server(requested_server, login_if_missing=bool(requested_server))
+    client = Client(credentials)
     try:
-        client, marker = client_for_workspace(directory)
+        marker = RunMarker.load(directory)
     except WorkspaceError:
-        client, _ = client_for_workspace()
         import_directory(client, directory, args.name)
         marker = RunMarker.load(directory)
+    if marker.server.rstrip("/") != credentials.server.rstrip("/"):
+        raise WorkspaceError(
+            f"This run belongs to {marker.server}, but zph is configured for {credentials.server}"
+        )
     assert marker is not None
     tail = ThermoTail(directory / args.thermo)
-    stopping = False
+    stopping = threading.Event()
 
     def stop(_: int, __: object) -> None:
-        nonlocal stopping
-        stopping = True
+        stopping.set()
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     print(f"Watching {marker.run_id}; heartbeat every {args.interval:g}s")
     last_status = "running"
-    while not stopping:
+    while not stopping.is_set():
         try:
             last_status = sync_once(client, marker, directory, tail)
         except ApiError as error:
             print(f"zph: telemetry delayed: {error}", file=sys.stderr)
         if args.pid and not process_exists(args.pid):
-            stopping = True
+            stopping.set()
             break
         if last_status in {"completed", "failed", "interrupted"}:
             break
-        time.sleep(args.interval)
-    final = last_status if last_status in {"completed", "failed"} else "interrupted"
+        stopping.wait(args.interval)
+    final = final_watch_status(directory, last_status)
     post_terminal(client, marker, directory, tail, final)
     print(f"Run marked {final}")
 
@@ -429,7 +523,8 @@ def parser() -> argparse.ArgumentParser:
 
     login = commands.add_parser("login", help="save and verify server credentials")
     login.add_argument("server")
-    login.add_argument("--token", help="API token (omit to paste it securely)")
+    login.add_argument("--name", help="name shown for this device")
+    login.add_argument("--token", help="use an existing API token instead of browser login")
     login.set_defaults(handler=cmd_login)
 
     import_command = commands.add_parser("import", help="register an existing ALAMO run")
@@ -448,6 +543,7 @@ def parser() -> argparse.ArgumentParser:
     watch.add_argument("--pid", type=int, help="stop when this local PID exits")
     watch.add_argument("--interval", type=float, default=30.0)
     watch.add_argument("--thermo", default="thermo.dat")
+    watch.add_argument("--server", help="connect to this server if zph is not configured")
     watch.set_defaults(handler=cmd_watch)
 
     run = commands.add_parser("run", help="run a command and monitor it")

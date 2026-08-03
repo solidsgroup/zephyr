@@ -61,6 +61,7 @@ async def protocol_metadata() -> dict[str, object]:
             "public-projects",
             "comparisons",
             "saved-views",
+            "device-login",
         ],
     }
 

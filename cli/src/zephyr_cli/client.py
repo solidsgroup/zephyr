@@ -16,6 +16,43 @@ class ApiError(RuntimeError):
     pass
 
 
+def api_request(
+    server: str,
+    method: str,
+    path: str,
+    payload: object | None = None,
+    query: list[tuple[str, str]] | None = None,
+    token: str | None = None,
+) -> Any:
+    url = f"{server.rstrip('/')}/api/v1{path}"
+    if query:
+        url = f"{url}?{urlencode(query)}"
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": f"zph/{__version__}",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=body, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=60) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else None
+    except HTTPError as error:
+        detail = error.reason
+        try:
+            data = json.loads(error.read())
+            detail = data.get("detail", data)
+        except (ValueError, OSError):
+            pass
+        raise ApiError(f"Zephyr returned {error.code}: {detail}") from error
+    except URLError as error:
+        raise ApiError(f"Cannot reach {server}: {error.reason}") from error
+
+
 class Client:
     def __init__(self, credentials: Credentials) -> None:
         self.server = credentials.server.rstrip("/")
@@ -28,32 +65,7 @@ class Client:
         payload: object | None = None,
         query: list[tuple[str, str]] | None = None,
     ) -> Any:
-        url = f"{self.server}/api/v1{path}"
-        if query:
-            url = f"{url}?{urlencode(query)}"
-        body = None if payload is None else json.dumps(payload).encode("utf-8")
-        headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {self.token}",
-            "User-Agent": f"zph/{__version__}",
-        }
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-        request = Request(url, data=body, headers=headers, method=method)
-        try:
-            with urlopen(request, timeout=60) as response:
-                raw = response.read()
-                return json.loads(raw) if raw else None
-        except HTTPError as error:
-            detail = error.reason
-            try:
-                data = json.loads(error.read())
-                detail = data.get("detail", data)
-            except (ValueError, OSError):
-                pass
-            raise ApiError(f"Zephyr returned {error.code}: {detail}") from error
-        except URLError as error:
-            raise ApiError(f"Cannot reach {self.server}: {error.reason}") from error
+        return api_request(self.server, method, path, payload, query, self.token)
 
     def upload_file(self, url: str, source: Path, headers: dict[str, str]) -> None:
         parsed = urlsplit(url)

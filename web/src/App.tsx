@@ -5,6 +5,7 @@ import { currentUser } from "./api";
 import Layout from "./components/Layout";
 
 const ComparePage = lazy(() => import("./pages/ComparePage"));
+const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const PublicProjectPage = lazy(() => import("./pages/PublicProjectPage"));
@@ -34,6 +35,7 @@ export default function App() {
   return (
     <Suspense fallback={<div className="center-state"><span className="spinner" />Loading Zephyr…</div>}>
       <Switch>
+        <Route path="/connect/:code" component={ConnectPage} />
         <Route path="/login" component={LoginPage} />
         <Route path="/public/:slug/*?" component={PublicProjectPage} />
         <Route component={PrivateApp} />

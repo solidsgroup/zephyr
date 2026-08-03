@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from zephyr_cli.alamo import ThermoTail, derived_status, metadata_values
+from zephyr_cli.main import final_watch_status
 
 
 def test_metadata_values_and_status() -> None:
@@ -33,3 +34,15 @@ def test_thermo_tail_keeps_unacknowledged_batch(tmp_path: Path) -> None:
     assert tail.poll() == first
     tail.ack()
     assert tail.poll() == []
+
+
+def test_final_watch_status_uses_latest_metadata(tmp_path: Path) -> None:
+    (tmp_path / "metadata").write_text("Status: complete\n", encoding="utf-8")
+
+    assert final_watch_status(tmp_path, "running") == "completed"
+
+
+def test_final_watch_status_marks_disappeared_process_interrupted(tmp_path: Path) -> None:
+    (tmp_path / "metadata").write_text("Status: running\n", encoding="utf-8")
+
+    assert final_watch_status(tmp_path, "running") == "interrupted"

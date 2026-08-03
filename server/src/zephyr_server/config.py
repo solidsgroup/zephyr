@@ -57,6 +57,8 @@ class Settings(DatabaseSettings):
     google_drive_folder_id: str = ""
     google_drive_service_account_json: str = ""
     download_url_ttl_seconds: int = 900
+    device_login_ttl_seconds: int = 600
+    device_login_poll_interval_seconds: int = 2
 
     @model_validator(mode="after")
     def validate_production(self) -> Settings:

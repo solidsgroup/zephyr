@@ -67,6 +67,21 @@ class ApiToken(TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="tokens")
 
 
+class DeviceAuthorization(TimestampMixin, Base):
+    __tablename__ = "device_authorizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    device_name: Mapped[str] = mapped_column(String(100))
+    device_secret_hash: Mapped[str] = mapped_column(String(64))
+    browser_secret_hash: Mapped[str] = mapped_column(String(64))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
 class Project(TimestampMixin, Base):
     __tablename__ = "projects"
 

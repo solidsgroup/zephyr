@@ -37,8 +37,10 @@ idempotent.
 
 Browser users authenticate through Google OIDC and must present a verified
 hosted-domain claim for `solids.group`. Browser mutations additionally require
-a session CSRF token. CLI/API tokens are random, shown once, stored as an
-HMAC-SHA256 digest, individually revocable, and never placed in run directories.
+a session CSRF token. CLI login uses a ten-minute device authorization with
+separate browser-approval and terminal-polling secrets. Approval creates a
+random API token that is returned once, stored as an HMAC-SHA256 digest,
+individually revocable, and never placed in run directories.
 
 Runs are private to their owner unless attached to a project. Private projects
 use explicit memberships, group projects are readable by authenticated group

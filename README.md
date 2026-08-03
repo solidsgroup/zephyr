@@ -30,12 +30,16 @@ HTTP/JSON contract under `/api/v1`.
 
 ## CLI workflow
 
-Create a token in **Settings → CLI tokens**, then connect once:
+Install the CLI and connect once:
 
 ```console
 pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
 zph login https://zephyr.solids.group
 ```
+
+`zph` prints a ten-minute browser link and tries to open it automatically. Sign
+in with Google in the browser; the terminal receives and stores a revocable CLI
+token without asking you to copy a secret.
 
 Register a completed directory, monitor an existing process, or let `zph`
 wrap a new execution:
@@ -57,6 +61,14 @@ zph get RUN_ID --output restored-run
 
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
 CI. Local run identity lives in `.zephyr.json`; credentials never do.
+
+ALAMO authenticates `zph` as part of configuration, then starts the watcher only
+for simulations given the boolean `--post` flag:
+
+```console
+./configure --zephyr https://zephyr.solids.group
+alamo --post input
+```
 
 ## Local development
 

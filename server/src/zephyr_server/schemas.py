@@ -35,6 +35,32 @@ class TokenCreated(TokenRead):
     token: str
 
 
+class DeviceAuthorizationCreate(BaseModel):
+    device_name: str = Field(min_length=1, max_length=100)
+
+
+class DeviceAuthorizationCreated(BaseModel):
+    device_code: str
+    verification_url: str
+    expires_in: int
+    interval: int
+
+
+class DeviceTokenExchange(BaseModel):
+    device_code: str = Field(min_length=20, max_length=200)
+
+
+class DeviceTokenResult(BaseModel):
+    status: Literal["pending", "approved", "expired", "consumed"]
+    token: str | None = None
+    email: EmailStr | None = None
+
+
+class DeviceApprovalRead(BaseModel):
+    status: Literal["approved"]
+    device_name: str
+
+
 RunStatus = Literal["starting", "running", "completed", "failed", "interrupted", "unreachable"]
 
 
