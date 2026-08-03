@@ -190,8 +190,11 @@ class RunOutput(TimestampMixin, Base):
     )
     stdout: Mapped[str] = mapped_column(Text, default="")
     stdout_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    stdout_digest: Mapped[str | None] = mapped_column(String(64))
     git_diff: Mapped[str] = mapped_column(Text, default="")
     git_diff_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    git_diff_digest: Mapped[str | None] = mapped_column(String(64))
+    thermo_digest: Mapped[str | None] = mapped_column(String(64))
 
     run: Mapped[Run] = relationship(back_populates="output_record")
 

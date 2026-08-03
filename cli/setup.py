@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="zph",
-    version="0.3.6",
+    version="0.3.7",
     description="Command-line client for the Zephyr ALAMO simulation service",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",

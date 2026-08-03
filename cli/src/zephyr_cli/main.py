@@ -416,6 +416,7 @@ def print_add_record(
     appearances = {
         "ADDED": ("●", ANSI_GREEN),
         "UPDATED": ("↻", ANSI_CYAN),
+        "CURRENT": ("✓", ANSI_DIM),
         "SKIPPED": ("○", ANSI_YELLOW),
         "ERROR": ("×", ANSI_RED),
     }
@@ -426,6 +427,102 @@ def print_add_record(
     location = paint(directory, ANSI_DIM, enabled=color)
     suffix = f"  {paint(detail, action_color, enabled=color)}" if detail else ""
     print(f"  {prefix}  {identity}  {state}  {location}{suffix}")
+
+
+def fetch_sync_states(client: Client, hashes: list[str]) -> dict[str, dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    for offset in range(0, len(hashes), 1000):
+        records = client.request(
+            "POST",
+            "/runs/sync-state",
+            {"hashes": hashes[offset : offset + 1000]},
+        )
+        for record in records:
+            alamo_hash = str(record["alamo_hash"])
+            if alamo_hash in states:
+                raise WorkspaceError(f"More than one owned Zephyr run has HASH {alamo_hash}")
+            states[alamo_hash] = record
+    return states
+
+
+def post_heartbeat(
+    client: Client,
+    run_id: str,
+    status: str,
+    progress: int | None,
+) -> None:
+    client.request(
+        "POST",
+        f"/runs/{run_id}/heartbeat",
+        {
+            "sequence": time.time_ns(),
+            "status": status,
+            "progress": progress,
+            "observed_at": utcnow(),
+        },
+    )
+
+
+def record_thermo_digest(client: Client, run_id: str, path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = file_digest(path)
+    client.request("PUT", f"/runs/{run_id}/output", {"thermo_digest": digest})
+    return digest
+
+
+def sync_thermo_snapshot(
+    client: Client,
+    run_id: str,
+    path: Path,
+    remote_digest: str | None,
+) -> bool:
+    if not path.is_file():
+        return False
+    digest = file_digest(path)
+    if digest == remote_digest:
+        return False
+    tail = ThermoTail(path)
+    for batch in tail.poll():
+        client.request("POST", f"/runs/{run_id}/thermo", batch)
+        tail.ack()
+    client.request("PUT", f"/runs/{run_id}/output", {"thermo_digest": digest})
+    return True
+
+
+def sync_existing_directory(
+    client: Client,
+    remote: dict[str, Any],
+    directory: Path,
+    status: str,
+) -> list[str]:
+    run_id = str(remote["id"])
+    changes: list[str] = []
+    text, values = read_metadata(directory)
+    digest = metadata_digest(text) if text else ""
+    if text and digest != remote.get("metadata_digest"):
+        client.request("PUT", f"/runs/{run_id}/metadata", {"raw_text": text})
+        SYNCED_METADATA_DIGESTS[run_id] = digest
+        changes.append("metadata")
+
+    output_fields = sync_run_output(client, run_id, directory, remote)
+    changes.extend(output_fields)
+
+    if sync_thermo_snapshot(
+        client,
+        run_id,
+        directory / "thermo.dat",
+        remote.get("thermo_digest"),
+    ):
+        changes.append("thermo")
+
+    _, progress = derived_status(values)
+    remote_progress = remote.get("progress")
+    needs_heartbeat = remote.get("status") != status or remote_progress != progress
+    if needs_heartbeat:
+        post_heartbeat(client, run_id, status, progress)
+        changes.append("status" if status in TERMINAL_STATUSES else "heartbeat")
+    return changes
 
 
 def cmd_add(args: argparse.Namespace) -> None:
@@ -476,23 +573,12 @@ def cmd_add(args: argparse.Namespace) -> None:
         print()
         return
 
-    client = configured_client()
-    try:
-        owner_id = str(client.request("GET", "/auth/me")["user"]["id"])
-    except (KeyError, TypeError) as error:
-        raise ApiError("Zephyr returned an invalid user record") from error
-    catalog = client.request("GET", "/runs", query=[("limit", "1000")])
-    existing_by_hash = {
-        str(run["alamo_hash"]): run
-        for run in catalog
-        if run.get("alamo_hash") and str(run.get("owner_id")) == owner_id
-    }
-
     added = 0
     updated = 0
+    current = 0
     skipped = len(ignored)
     failed = 0
-    candidates: list[tuple[Path, str, str, str, bool]] = []
+    candidates: list[tuple[Path, str, str, str]] = []
     seen_hashes: dict[str, str] = {}
     for directory in directories:
         location = display_run_path(directory, root)
@@ -524,9 +610,7 @@ def cmd_add(args: argparse.Namespace) -> None:
                 continue
             seen_hashes[alamo_hash] = location
             status, _ = derived_status(values)
-            candidates.append(
-                (directory, location, alamo_hash, status, alamo_hash in existing_by_hash)
-            )
+            candidates.append((directory, location, alamo_hash, status))
         except (ApiError, WorkspaceError, OSError) as error:
             failed += 1
             print_add_record(
@@ -538,17 +622,31 @@ def cmd_add(args: argparse.Namespace) -> None:
                 detail=str(error),
             )
 
-    def sync_candidate(candidate: tuple[Path, str, str, str, bool]) -> dict[str, Any]:
-        directory, _, _, status, _ = candidate
+    client = configured_client()
+    print(
+        f"  Check  {paint(str(len(candidates)), ANSI_BOLD, enabled=color)} fingerprints",
+        flush=True,
+    )
+    existing_by_hash = fetch_sync_states(
+        client, [candidate[2] for candidate in candidates]
+    )
+
+    def sync_candidate(candidate: tuple[Path, str, str, str]) -> tuple[bool, list[str]]:
+        directory, _, alamo_hash, status = candidate
+        remote = existing_by_hash.get(alamo_hash)
+        if remote is not None:
+            return False, sync_existing_directory(client, remote, directory, status)
         run = import_directory(client, directory, status=status)
+        run_id = str(run["id"])
         sync_once(
             client,
-            str(run["id"]),
+            run_id,
             directory,
             ThermoTail(directory / "thermo.dat"),
             status_override=status,
         )
-        return run
+        record_thermo_digest(client, run_id, directory / "thermo.dat")
+        return True, ["new run"]
 
     worker_count = min(4, len(candidates))
     if worker_count:
@@ -563,15 +661,26 @@ def cmd_add(args: argparse.Namespace) -> None:
                 executor.submit(sync_candidate, candidate): candidate for candidate in candidates
             }
             for future in as_completed(futures):
-                _, location, alamo_hash, status, existing = futures[future]
+                _, location, alamo_hash, status = futures[future]
                 try:
-                    future.result()
-                    action = "UPDATED" if existing else "ADDED"
-                    if existing:
+                    is_new, changes = future.result()
+                    if is_new:
+                        action = "ADDED"
+                        added += 1
+                    elif changes:
+                        action = "UPDATED"
                         updated += 1
                     else:
-                        added += 1
-                    print_add_record(action, alamo_hash, status, location, color=color)
+                        action = "CURRENT"
+                        current += 1
+                    print_add_record(
+                        action,
+                        alamo_hash,
+                        status,
+                        location,
+                        color=color,
+                        detail=", ".join(changes) if changes else "already current",
+                    )
                 except (ApiError, WorkspaceError, OSError) as error:
                     failed += 1
                     print_add_record(
@@ -583,14 +692,15 @@ def cmd_add(args: argparse.Namespace) -> None:
                         detail=str(error),
                     )
 
-    processed = added + updated
     print()
     print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
     summary = (
-        f"{processed} processed  ·  "
+        f"{len(candidates)} checked  ·  "
         f"{paint(str(added), ANSI_GREEN, ANSI_BOLD, enabled=color)} added  ·  "
         f"{paint(str(updated), ANSI_CYAN, ANSI_BOLD, enabled=color)} updated"
     )
+    if current:
+        summary += f"  ·  {paint(str(current), ANSI_BOLD, enabled=color)} current"
     if skipped:
         summary += f"  ·  {paint(str(skipped), ANSI_YELLOW, ANSI_BOLD, enabled=color)} skipped"
     if failed:
@@ -621,16 +731,7 @@ def sync_once(
     for batch in tail.poll():
         client.request("POST", f"/runs/{run_id}/thermo", batch)
         tail.ack()
-    client.request(
-        "POST",
-        f"/runs/{run_id}/heartbeat",
-        {
-            "sequence": time.time_ns(),
-            "status": status,
-            "progress": progress,
-            "observed_at": utcnow(),
-        },
-    )
+    post_heartbeat(client, run_id, status, progress)
     return status
 
 
@@ -644,7 +745,12 @@ def captured_text(path: Path, *, keep_tail: bool) -> tuple[str, bool]:
     return data.decode("utf-8", errors="replace"), truncated
 
 
-def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
+def sync_run_output(
+    client: Client,
+    run_id: str,
+    directory: Path,
+    remote_digests: dict[str, Any] | None = None,
+) -> list[str]:
     stdout_path = None
     for name in ("out.log", "stdout"):
         candidate = directory / name
@@ -657,21 +763,27 @@ def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
     }
     updates: dict[str, object] = {}
     pending: dict[tuple[str, str], str] = {}
+    changed: list[str] = []
     for field, (path, keep_tail) in sources.items():
         if path is None or not path.is_file():
             continue
         text, truncated = captured_text(path, keep_tail=keep_tail)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         key = (run_id, field)
+        if remote_digests is not None and remote_digests.get(f"{field}_digest") == digest:
+            SYNCED_OUTPUT_DIGESTS[key] = digest
+            continue
         if SYNCED_OUTPUT_DIGESTS.get(key) == digest:
             continue
         updates[field] = text
         updates[f"{field}_truncated"] = truncated
         pending[key] = digest
+        changed.append("stdout" if field == "stdout" else "git diff")
     if not updates:
-        return
+        return []
     client.request("PUT", f"/runs/{run_id}/output", updates)
     SYNCED_OUTPUT_DIGESTS.update(pending)
+    return changed
 
 
 def process_exists(pid: int) -> bool:

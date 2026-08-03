@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -35,6 +36,8 @@ from ..schemas import (
     RunOutputRead,
     RunOutputWrite,
     RunRead,
+    RunSyncState,
+    RunSyncStateRequest,
     RunUpdate,
     ThermoBatch,
     ThermoRow,
@@ -232,6 +235,49 @@ async def create_run(
     return run_read(run)
 
 
+@router.post("/sync-state", response_model=list[RunSyncState])
+async def sync_state(
+    payload: RunSyncStateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return compact fingerprints for bulk CLI synchronization."""
+    rows = (
+        await db.execute(
+            select(Run, RunMetadata, RunOutput)
+            .outerjoin(RunMetadata, RunMetadata.run_id == Run.id)
+            .outerjoin(RunOutput, RunOutput.run_id == Run.id)
+            .where(Run.owner_id == user.id, Run.alamo_hash.in_(payload.hashes))
+        )
+    ).all()
+    states: list[RunSyncState] = []
+    backfilled = False
+    for run, metadata, output in rows:
+        if run.alamo_hash is None:
+            continue
+        if output is not None and output.stdout_digest is None:
+            output.stdout_digest = hashlib.sha256(output.stdout.encode("utf-8")).hexdigest()
+            backfilled = True
+        if output is not None and output.git_diff_digest is None:
+            output.git_diff_digest = hashlib.sha256(output.git_diff.encode("utf-8")).hexdigest()
+            backfilled = True
+        states.append(
+            RunSyncState(
+                id=run.id,
+                alamo_hash=run.alamo_hash,
+                status=run.status,
+                progress=run.progress,
+                metadata_digest=metadata.digest if metadata else None,
+                stdout_digest=output.stdout_digest if output else None,
+                git_diff_digest=output.git_diff_digest if output else None,
+                thermo_digest=output.thermo_digest if output else None,
+            )
+        )
+    if backfilled:
+        await db.commit()
+    return states
+
+
 @router.get("/{run_id}")
 async def get_run(
     run_id: uuid.UUID,
@@ -364,7 +410,14 @@ async def write_output(
     if record is None:
         record = RunOutput(run_id=run.id)
         db.add(record)
-    for key, value in payload.model_dump(exclude_unset=True, exclude_none=True).items():
+    values = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if "stdout" in values:
+        record.stdout_digest = hashlib.sha256(values["stdout"].encode("utf-8")).hexdigest()
+    if "git_diff" in values:
+        record.git_diff_digest = hashlib.sha256(
+            values["git_diff"].encode("utf-8")
+        ).hexdigest()
+    for key, value in values.items():
         setattr(record, key, value)
     await db.commit()
     await db.refresh(record)

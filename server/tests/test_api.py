@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -44,6 +46,22 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert output.status_code == 200
             assert output.json()["stdout"] == "step 1 complete\n"
+            assert output.json()["stdout_digest"] == hashlib.sha256(
+                b"step 1 complete\n"
+            ).hexdigest()
+
+            sync_state = await client.post(
+                "/api/v1/runs/sync-state",
+                json={"hashes": ["abc123", "not-owned"]},
+                headers=headers,
+            )
+            assert sync_state.status_code == 200
+            assert len(sync_state.json()) == 1
+            assert sync_state.json()[0]["alamo_hash"] == "abc123"
+            assert sync_state.json()[0]["metadata_digest"] == hashlib.sha256(
+                b"HASH = abc123\nStatus = running\nProgress = 25\n"
+            ).hexdigest()
+            assert sync_state.json()[0]["stdout_digest"] == output.json()["stdout_digest"]
 
             thermo = await client.post(
                 f"/api/v1/runs/{run_id}/thermo",

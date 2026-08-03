@@ -143,19 +143,38 @@ class MetadataRead(BaseModel):
     digest: str
 
 
+class RunSyncStateRequest(BaseModel):
+    hashes: list[str] = Field(min_length=1, max_length=1000)
+
+
+class RunSyncState(BaseModel):
+    id: uuid.UUID
+    alamo_hash: str
+    status: str
+    progress: int | None
+    metadata_digest: str | None = None
+    stdout_digest: str | None = None
+    git_diff_digest: str | None = None
+    thermo_digest: str | None = None
+
+
 class RunOutputWrite(BaseModel):
     stdout: str | None = Field(default=None, max_length=2_000_000)
     stdout_truncated: bool | None = None
     git_diff: str | None = Field(default=None, max_length=2_000_000)
     git_diff_truncated: bool | None = None
+    thermo_digest: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class RunOutputRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     stdout: str
     stdout_truncated: bool
+    stdout_digest: str | None
     git_diff: str
     git_diff_truncated: bool
+    git_diff_digest: str | None
+    thermo_digest: str | None
     updated_at: datetime
 
 

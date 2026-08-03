@@ -155,12 +155,19 @@ def test_add_reports_added_updated_and_skipped_runs(
             query: object | None = None,
         ) -> Any:
             requests.append((method, path, payload, query))
-            if (method, path) == ("GET", "/auth/me"):
-                return {"user": {"id": "owner-1"}}
-            if (method, path) == ("GET", "/runs"):
-                assert dict(query or []) == {"limit": "1000"}
+            if (method, path) == ("POST", "/runs/sync-state"):
+                assert payload == {"hashes": ["hash-new", "hash-old"]}
                 return [
-                    {"id": "old-id", "alamo_hash": "hash-old", "owner_id": "owner-1"}
+                    {
+                        "id": "old-id",
+                        "alamo_hash": "hash-old",
+                        "status": "starting",
+                        "progress": None,
+                        "metadata_digest": None,
+                        "stdout_digest": None,
+                        "git_diff_digest": None,
+                        "thermo_digest": None,
+                    }
                 ]
             if (method, path) == ("POST", "/runs"):
                 assert isinstance(payload, dict)
@@ -193,7 +200,7 @@ def test_add_reports_added_updated_and_skipped_runs(
         for method, path, payload, _ in requests
         if (method, path) == ("POST", "/runs") and isinstance(payload, dict)
     }
-    assert created_statuses == {"hash-new": "completed", "hash-old": "failed"}
+    assert created_statuses == {"hash-new": "completed"}
     assert any(
         method == "POST" and path == "/runs/new-id/thermo"
         for method, path, _, _ in requests
@@ -209,7 +216,10 @@ def test_add_reports_added_updated_and_skipped_runs(
         "git_diff": "diff --git a/a.cpp b/a.cpp\n",
         "git_diff_truncated": False,
     }
-    assert sum(method == "GET" and path == "/runs" for method, path, _, _ in requests) == 1
+    assert sum(
+        method == "POST" and path == "/runs/sync-state"
+        for method, path, _, _ in requests
+    ) == 1
     assert sum(
         method == "PUT" and path == "/runs/new-id/metadata"
         for method, path, _, _ in requests
@@ -241,9 +251,7 @@ def test_add_syncs_multiple_runs_concurrently(
             query: object | None = None,
         ) -> Any:
             nonlocal active, maximum_active
-            if (method, path) == ("GET", "/auth/me"):
-                return {"user": {"id": "owner-1"}}
-            if (method, path) == ("GET", "/runs"):
+            if (method, path) == ("POST", "/runs/sync-state"):
                 return []
             if (method, path) == ("POST", "/runs"):
                 assert isinstance(payload, dict)
@@ -266,6 +274,54 @@ def test_add_syncs_multiple_runs_concurrently(
 
     assert maximum_active >= 2
     assert "4 concurrent connections" in capsys.readouterr().out
+
+
+def test_add_skips_network_writes_for_current_completed_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    directory = tmp_path / "run"
+    directory.mkdir()
+    metadata = "HASH = hash-current\nStatus = Complete\n"
+    (directory / "metadata").write_text(metadata, encoding="utf-8")
+    requests: list[tuple[str, str, object | None]] = []
+
+    class FakeClient:
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: object | None = None,
+            query: object | None = None,
+        ) -> Any:
+            requests.append((method, path, payload))
+            if (method, path) == ("POST", "/runs/sync-state"):
+                return [
+                    {
+                        "id": "run-id",
+                        "alamo_hash": "hash-current",
+                        "status": "completed",
+                        "progress": None,
+                        "metadata_digest": main.metadata_digest(metadata),
+                        "stdout_digest": None,
+                        "git_diff_digest": None,
+                        "thermo_digest": None,
+                    }
+                ]
+            raise AssertionError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setattr(main, "configured_client", FakeClient)
+
+    main.cmd_add(argparse.Namespace(paths=[str(tmp_path)]))
+
+    assert requests == [
+        ("POST", "/runs/sync-state", {"hashes": ["hash-current"]})
+    ]
+    output = capsys.readouterr().out
+    assert "CURRENT" in output
+    assert "already current" in output
+    assert "1 current" in output
 
 
 def test_git_repository_url_normalizes_github_ssh_remote(tmp_path: Path) -> None:
