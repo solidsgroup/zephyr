@@ -73,13 +73,16 @@ def git_repository_url(directory: Path) -> str | None:
     if match:
         url = f"https://{match.group(1)}/{match.group(2)}"
     elif url.startswith("ssh://git@"):
-        url = f"https://{url.removeprefix('ssh://git@')}"
-    return url.removesuffix(".git").rstrip("/") or None
+        url = f"https://{url[len('ssh://git@'):]}"
+    if url.endswith(".git"):
+        url = url[:-4]
+    return url.rstrip("/") or None
 
 
 def scheduler_job_id() -> str | None:
     for name in ("SLURM_JOB_ID", "PBS_JOBID", "LSB_JOBID", "JOB_ID"):
-        if value := os.environ.get(name):
+        value = os.environ.get(name)
+        if value:
             return f"{name}={value}"
     return None
 
@@ -544,10 +547,12 @@ def captured_text(path: Path, *, keep_tail: bool) -> tuple[str, bool]:
 
 
 def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
-    stdout_path = next(
-        (path for name in ("out.log", "stdout") if (path := directory / name).is_file()),
-        None,
-    )
+    stdout_path = None
+    for name in ("out.log", "stdout"):
+        candidate = directory / name
+        if candidate.is_file():
+            stdout_path = candidate
+            break
     sources = {
         "stdout": (stdout_path, True),
         "git_diff": (directory / "diff.patch", False),
@@ -748,8 +753,10 @@ def artifact_kind(path: Path) -> str:
 def file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
-        while block := stream.read(1024 * 1024):
+        block = stream.read(1024 * 1024)
+        while block:
             digest.update(block)
+            block = stream.read(1024 * 1024)
     return digest.hexdigest()
 
 
@@ -811,8 +818,10 @@ def cmd_put(args: argparse.Namespace) -> None:
 
 def safe_destination(root: Path, relative: str) -> Path:
     target = (root / relative).resolve()
-    if not target.is_relative_to(root.resolve()):
-        raise WorkspaceError(f"Server returned an unsafe artifact path: {relative}")
+    try:
+        target.relative_to(root.resolve())
+    except ValueError:
+        raise WorkspaceError(f"Server returned an unsafe artifact path: {relative}") from None
     return target
 
 

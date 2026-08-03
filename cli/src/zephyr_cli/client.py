@@ -85,8 +85,10 @@ class Client:
             connection.putheader("Content-Length", str(source.stat().st_size))
             connection.endheaders()
             with source.open("rb") as stream:
-                while block := stream.read(1024 * 1024):
+                block = stream.read(1024 * 1024)
+                while block:
                     connection.send(block)
+                    block = stream.read(1024 * 1024)
             response = connection.getresponse()
             response.read()
             if not 200 <= response.status < 300:

@@ -1,7 +1,8 @@
 # zph
 
-`zph` is the lightweight command-line client for Zephyr. It has no runtime
-dependencies outside Python's standard library.
+`zph` is the lightweight command-line client for Zephyr. It supports Python
+3.7 and newer and has no runtime dependencies outside Python's standard
+library.
 
 ```console
 pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
@@ -14,6 +15,20 @@ zph put '*.png'
 zph put output/myfile.png
 zph get HASH
 ```
+
+On a cluster without `pipx`, recent packaging tools, or internet access from
+compute nodes, clone or copy the repository once and build a self-contained
+executable using only the Python standard library:
+
+```console
+python3 cli/install.py --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+zph --version
+```
+
+The resulting `~/.local/bin/zph` is a single zip application. It can be copied
+to another machine with the same or a newer Python interpreter; it does not
+need a virtual environment, `pip`, `setuptools`, or `wheel`.
 
 Login uses a short-lived browser link. If a browser cannot be opened on the
 machine running `zph`, copy the printed URL to any browser, sign in, and return

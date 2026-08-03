@@ -109,7 +109,7 @@ class ThermoTail:
             parsed = [float(value) for value in fields]
             values = {
                 column: value if math.isfinite(value) else None
-                for column, value in zip(self.columns, parsed, strict=True)
+            for column, value in zip(self.columns, parsed)
             }
             rows.append({"sequence": self.sequence, "values": values})
             self.sequence += 1

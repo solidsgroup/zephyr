@@ -38,6 +38,10 @@ pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
 zph login https://zephyr.solids.group
 ```
 
+The CLI supports Python 3.7+ and has no runtime dependencies. On restricted
+clusters, `python3 cli/install.py` produces a single `~/.local/bin/zph`
+executable without using `pip`, `pipx`, `setuptools`, or `wheel`.
+
 `zph` prints a ten-minute browser link and tries to open it automatically. Sign
 in with Google in the browser; the terminal receives and stores a revocable CLI
 token without asking you to copy a secret.

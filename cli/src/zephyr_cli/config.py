@@ -100,5 +100,8 @@ class Credentials:
             os.replace(temporary, path)
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         except BaseException:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
             raise
