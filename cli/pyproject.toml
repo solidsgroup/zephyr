@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zph"
-version = "0.3.2"
+version = "0.3.3"
 description = "Command-line client for the Zephyr ALAMO simulation service"
 readme = "README.md"
 license = {text = "MIT"}

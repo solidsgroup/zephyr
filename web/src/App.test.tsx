@@ -8,7 +8,7 @@ import type { Run } from "./types";
 describe("StatusPill", () => {
   it("shows the effective run state", () => {
     render(<StatusPill status="unreachable" />);
-    expect(screen.getByText("unreachable")).toBeInTheDocument();
+    expect(screen.getByLabelText("unreachable")).toBeInTheDocument();
   });
 });
 

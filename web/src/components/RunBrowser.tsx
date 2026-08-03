@@ -103,7 +103,6 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
                   <div className="run-artifact-slot"><ArtifactStack run={run} /></div>
                   <div className="run-browser-copy">
                     <div><strong title={run.name}>{run.name}</strong><StatusPill status={run.effective_status} /></div>
-                    <code>{run.alamo_hash ?? run.id}</code>
                     <small>{run.host ?? "Unknown host"}<span>·</span>{age(run.last_heartbeat)}</small>
                     {run.progress != null && <span className="run-browser-progress"><i style={{ width: `${run.progress}%` }} /></span>}
                   </div>

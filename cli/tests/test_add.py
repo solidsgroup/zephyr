@@ -74,6 +74,8 @@ def test_add_reports_added_updated_and_skipped_runs(
         encoding="utf-8",
     )
     (new_run / "thermo.dat").write_text("step value\n0 2.5\n", encoding="utf-8")
+    (new_run / "out.log").write_text("ALAMO output\n", encoding="utf-8")
+    (new_run / "diff.patch").write_text("diff --git a/a.cpp b/a.cpp\n", encoding="utf-8")
     (old_run / "metadata").write_text(
         "Git_commit_hash = def456\nHASH = hash-old\nStatus = Segfault\n",
         encoding="utf-8",
@@ -135,3 +137,46 @@ def test_add_reports_added_updated_and_skipped_runs(
         method == "POST" and path == "/runs/new-id/thermo"
         for method, path, _, _ in requests
     )
+    posted_output = next(
+        payload
+        for method, path, payload, _ in requests
+        if method == "PUT" and path == "/runs/new-id/output"
+    )
+    assert posted_output == {
+        "stdout": "ALAMO output\n",
+        "stdout_truncated": False,
+        "git_diff": "diff --git a/a.cpp b/a.cpp\n",
+        "git_diff_truncated": False,
+    }
+
+
+def test_git_repository_url_normalizes_github_ssh_remote(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:solidsgroup/alamo.git",
+        ],
+        check=True,
+    )
+
+    assert main.git_repository_url(tmp_path) == "https://github.com/solidsgroup/alamo"
+
+
+def test_captured_text_keeps_stdout_tail_and_diff_head(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "output.txt"
+    path.write_text("0123456789", encoding="utf-8")
+    monkeypatch.setattr(main, "MAX_CAPTURED_TEXT_BYTES", 5)
+
+    assert main.captured_text(path, keep_tail=True) == ("56789", True)
+    assert main.captured_text(path, keep_tail=False) == ("01234", True)

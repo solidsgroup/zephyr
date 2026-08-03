@@ -124,6 +124,7 @@ class Run(TimestampMixin, Base):
     platform: Mapped[str | None] = mapped_column(String(255))
     scheduler_job_id: Mapped[str | None] = mapped_column(String(255))
     git_commit: Mapped[str | None] = mapped_column(String(128), index=True)
+    git_repository_url: Mapped[str | None] = mapped_column(String(500))
     command: Mapped[list[str]] = mapped_column(JSON, default=list)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     notes: Mapped[str] = mapped_column(Text, default="")
@@ -137,6 +138,9 @@ class Run(TimestampMixin, Base):
     )
 
     metadata_record: Mapped[RunMetadata | None] = relationship(
+        back_populates="run", cascade="all, delete", uselist=False
+    )
+    output_record: Mapped[RunOutput | None] = relationship(
         back_populates="run", cascade="all, delete", uselist=False
     )
     thermo_series: Mapped[list[ThermoSeries]] = relationship(
@@ -176,6 +180,20 @@ class RunMetadata(TimestampMixin, Base):
     digest: Mapped[str] = mapped_column(String(64), default="")
 
     run: Mapped[Run] = relationship(back_populates="metadata_record")
+
+
+class RunOutput(TimestampMixin, Base):
+    __tablename__ = "run_outputs"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    stdout: Mapped[str] = mapped_column(Text, default="")
+    stdout_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    git_diff: Mapped[str] = mapped_column(Text, default="")
+    git_diff_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    run: Mapped[Run] = relationship(back_populates="output_record")
 
 
 class ThermoSeries(TimestampMixin, Base):

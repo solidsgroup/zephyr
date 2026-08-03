@@ -70,9 +70,7 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-browser-copy { min-width: 0; display: flex; flex-direction: column; }
 .run-browser-copy > div { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .run-browser-copy strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #18202d; font-size: 11px; font-weight: 700; }
-.run-browser-copy .status { flex: 0 0 auto; padding: 2px 5px; gap: 3px; font-size: 7px; }
-.run-browser-copy .status i { width: 4px; height: 4px; }
-.run-browser-copy code { max-width: 100%; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7c8799; font-size: 8px; }
+.run-browser-copy .status-dot { flex: 0 0 auto; }
 .run-browser-copy small { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #98a2b3; font-size: 8px; }
 .run-browser-copy small span { margin: 0 4px; color: #c3cad5; }
 .run-browser-progress { display: block; width: 100%; height: 2px; margin-top: 5px; overflow: hidden; border-radius: 3px; background: #dfe6ef; }
@@ -131,13 +129,14 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .run-preview-card span { font-size: 18px; }
 .run-preview-stack > small { position: absolute; right: 0; bottom: -1px; z-index: 6; background: #344054; color: white; border: 2px solid white; border-radius: 99px; min-width: 19px; padding: 1px 4px; font-size: 8px; text-align: center; }
 .run-preview-empty { width: 48px; height: 38px; display: grid; place-items: center; border: 1px solid #dfe4ec; border-radius: 7px; background: linear-gradient(145deg, #eef2f8, #f8fafc); color: #a7b0bf; font-size: 13px; font-weight: 700; }
-.status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 8px; font-size: 10px; font-weight: 700; text-transform: capitalize; background: #f2f4f7; color: #475467; }
-.status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.status-running, .status-starting { background: #eaf1ff; color: #175cd3; }
+.status-dot { display: inline-grid; place-items: center; width: 12px; height: 12px; flex: 0 0 auto; color: #667085; background: transparent; }
+.status-dot i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.status-running, .status-starting { color: #246bfd; background: transparent; }
 .status-running i { animation: pulse 1.8s infinite; }
-.status-completed { background: #ecfdf3; color: #027a48; }
-.status-failed { background: #fef3f2; color: #b42318; }
-.status-interrupted, .status-unreachable { background: #fff6e8; color: #b54708; }
+.status-completed { color: #12a66a; background: transparent; }
+.status-failed { color: #d92d20; background: transparent; }
+.status-interrupted { color: #dc8b18; background: transparent; }
+.status-unreachable { color: #98a2b3; background: transparent; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px #246bfd22; } }
 .progress-cell { display: flex; align-items: center; gap: 7px; font-size: 10px; }
 .progress-cell > span { width: 64px; height: 4px; background: #edf0f4; overflow: hidden; border-radius: 9px; }
@@ -153,7 +152,21 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .run-header { align-items: center; margin-bottom: 22px; }
 .run-title-row { display: flex; align-items: center; gap: 12px; }
 .run-header p code { font-size: 10px; }
-.tabs { display: flex; border-bottom: 1px solid #dfe4ec; gap: 24px; margin-bottom: 23px; }
+.editable-run-title { display: flex; align-items: center; gap: 8px; max-width: min(720px, 65vw); border: 0; padding: 0; background: transparent; color: inherit; text-align: left; }
+.editable-run-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editable-run-title span { opacity: 0; color: #98a2b3; font-size: 15px; transition: opacity .12s; }
+.editable-run-title:hover span, .editable-run-title:focus-visible span { opacity: 1; }
+.run-title-input { width: min(620px, 60vw); border: 0; border-bottom: 2px solid var(--blue); border-radius: 0; padding: 2px 0 3px; background: transparent; color: #101828; font-size: 32px; font-weight: 700; letter-spacing: -.045em; line-height: 1.18; outline: none; box-shadow: none !important; }
+.run-menu { position: relative; }
+.run-menu > summary { width: 35px; height: 35px; display: grid; place-items: center; border: 1px solid #d0d5dd; border-radius: 8px; background: white; box-shadow: 0 1px 2px #1018280d; color: #667085; font-weight: 700; letter-spacing: 1px; cursor: pointer; list-style: none; }
+.run-menu > summary::-webkit-details-marker { display: none; }
+.run-menu[open] > summary, .run-menu > summary:hover { background: #f8fafc; color: #344054; }
+.run-menu-popover { position: absolute; z-index: 20; right: 0; top: 42px; width: 300px; padding: 16px; border: 1px solid #d8dee7; border-radius: 10px; background: white; box-shadow: 0 16px 40px #10182826; }
+.run-menu-popover > strong { display: block; margin-bottom: 13px; color: #101828; font-size: 12px; }
+.run-menu-popover label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 11px; color: #667085; font-size: 9px; font-weight: 700; }
+.run-menu-popover textarea { resize: vertical; }
+.run-menu-actions { display: flex; justify-content: space-between; align-items: center; padding-top: 3px; }
+.tabs { display: flex; overflow-x: auto; border-bottom: 1px solid #dfe4ec; gap: 24px; margin-bottom: 23px; scrollbar-width: none; }
 .tabs button { border: 0; background: transparent; color: #667085; padding: 9px 2px 12px; text-transform: capitalize; font-size: 12px; font-weight: 600; border-bottom: 2px solid transparent; }
 .tabs button.active { color: #175cd3; border-bottom-color: #246bfd; }
 .tabs button span { margin-left: 6px; background: #eaecf0; border-radius: 99px; padding: 2px 6px; font-size: 9px; }
@@ -164,6 +177,9 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .metric-grid > div:last-child { border: 0; }
 .metric-grid small { color: #7b8799; font-size: 10px; margin-bottom: 7px; }
 .metric-grid strong { color: #101828; font-size: 14px; }
+.commit-link { display: inline-flex; align-items: center; gap: 5px; color: #175cd3; text-decoration: none; }
+.commit-link:hover { text-decoration: underline; }
+.commit-link span { font-size: 10px; }
 .panel-heading { padding: 18px 20px 12px; align-items: center; }
 .panel-heading h2, .section-heading h2, .edit-panel h2, .project-workspace h3, .settings-panel h2, .cli-help h2 { margin: 2px 0; font-size: 16px; letter-spacing: -.02em; }
 .panel-heading > span { font-size: 10px; color: #98a2b3; }
@@ -199,6 +215,16 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .metadata-table tr.changed td { background: #fffaeb; }
 .raw-metadata { border-top: 1px solid #eaecf0; margin-top: 8px; padding: 14px 20px; font-size: 11px; color: #667085; }
 .raw-metadata pre { white-space: pre-wrap; max-height: 420px; overflow: auto; background: #f8fafc; padding: 14px; border-radius: 7px; color: #344054; }
+.output-panel { overflow: hidden; }
+.output-panel .panel-heading { border-bottom: 1px solid #273142; background: #151d29; }
+.output-panel .panel-heading .eyebrow, .output-panel .panel-heading > span { color: #8793a6 !important; }
+.output-panel .panel-heading h2 { color: #f2f4f7; }
+.output-panel > pre { min-height: 420px; max-height: calc(100vh - 285px); margin: 0; overflow: auto; padding: 18px 20px 28px; background: #0d1420; color: #d0d5dd; font-size: 10px; line-height: 1.65; tab-size: 4; white-space: pre-wrap; word-break: break-word; }
+.diff-output > pre { color: #d6e3f5; white-space: pre; word-break: normal; }
+.output-note { margin: 0; padding: 8px 18px; border-top: 1px solid #273142; background: #151d29; color: #98a2b3; font-size: 9px; }
+.output-panel .empty-panel { min-height: 420px; margin: 0; background: #0d1420; color: #98a2b3; }
+.output-panel .clean-diff { color: #75e0a7; }
+.output-panel .clean-diff span { margin-right: 7px; font-size: 16px; }
 
 .create-project { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; align-items: end; gap: 12px; padding: 18px; }
 .create-project label { margin: 0; }

@@ -26,7 +26,9 @@ CLI does not create a Zephyr-specific identity file in the run directory.
 recursively, and imports each directory containing an ALAMO `metadata` file.
 Both `zph add output*` and `zph add 'output*'` work. Each result is clearly
 labeled as `ADDED`, `UPDATED`, `SKIPPED`, or `ERROR`; `thermo.dat` is imported
-when present. Interactive output uses color; set `NO_COLOR=1` for plain output.
+when present, along with ALAMO's `out.log` and `diff.patch`. Watchers refresh
+the captured terminal output as the simulation runs. Interactive output uses
+color; set `NO_COLOR=1` for plain output.
 
 `zph put` looks for `metadata` beside each target file. Thus
 `zph put output/myfile.png` automatically selects the run described by

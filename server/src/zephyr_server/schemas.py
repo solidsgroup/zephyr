@@ -75,6 +75,7 @@ class RunCreate(BaseModel):
     platform: str | None = Field(default=None, max_length=255)
     scheduler_job_id: str | None = Field(default=None, max_length=255)
     git_commit: str | None = Field(default=None, max_length=128)
+    git_repository_url: str | None = Field(default=None, max_length=500)
     command: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
@@ -112,6 +113,7 @@ class RunRead(BaseModel):
     platform: str | None
     scheduler_job_id: str | None
     git_commit: str | None
+    git_repository_url: str | None
     command: list[str]
     tags: list[str]
     notes: str
@@ -139,6 +141,22 @@ class MetadataRead(BaseModel):
     values: dict[str, str]
     sections: dict[str, list[str]]
     digest: str
+
+
+class RunOutputWrite(BaseModel):
+    stdout: str | None = Field(default=None, max_length=2_000_000)
+    stdout_truncated: bool | None = None
+    git_diff: str | None = Field(default=None, max_length=2_000_000)
+    git_diff_truncated: bool | None = None
+
+
+class RunOutputRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    stdout: str
+    stdout_truncated: bool
+    git_diff: str
+    git_diff_truncated: bool
+    updated_at: datetime
 
 
 class ThermoRow(BaseModel):

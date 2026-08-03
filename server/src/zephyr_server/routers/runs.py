@@ -18,6 +18,7 @@ from ..models import (
     Run,
     RunArtifact,
     RunMetadata,
+    RunOutput,
     RunProject,
     ThermoPoint,
     ThermoSeries,
@@ -31,6 +32,8 @@ from ..schemas import (
     MetadataRead,
     MetadataWrite,
     RunCreate,
+    RunOutputRead,
+    RunOutputWrite,
     RunRead,
     RunUpdate,
     ThermoBatch,
@@ -237,6 +240,7 @@ async def get_run(
 ) -> dict[str, Any]:
     run = await get_accessible_run(db, user, run_id)
     metadata = await db.get(RunMetadata, run.id)
+    output = await db.get(RunOutput, run.id)
     series = list(
         await db.scalars(
             select(ThermoSeries)
@@ -248,6 +252,7 @@ async def get_run(
     return {
         "run": run_read(run),
         "metadata": MetadataRead.model_validate(metadata) if metadata else None,
+        "output": RunOutputRead.model_validate(output) if output else None,
         "thermo": [
             ThermoSeriesRead(
                 segment=item.segment,
@@ -343,6 +348,27 @@ async def write_metadata(
     await db.commit()
     await db.refresh(record)
     return MetadataRead.model_validate(record)
+
+
+@router.put("/{run_id}/output", response_model=RunOutputRead)
+async def write_output(
+    run_id: uuid.UUID,
+    payload: RunOutputWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await get_accessible_run(db, user, run_id)
+    if run.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can post run output")
+    record = await db.get(RunOutput, run.id)
+    if record is None:
+        record = RunOutput(run_id=run.id)
+        db.add(record)
+    for key, value in payload.model_dump(exclude_unset=True, exclude_none=True).items():
+        setattr(record, key, value)
+    await db.commit()
+    await db.refresh(record)
+    return RunOutputRead.model_validate(record)
 
 
 @router.post("/{run_id}/thermo", status_code=202)

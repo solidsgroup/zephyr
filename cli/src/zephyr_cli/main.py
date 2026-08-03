@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import signal
 import socket
 import subprocess
@@ -26,6 +27,7 @@ from .workspace import WorkspaceError
 
 TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 WATCH_LOCAL_POLL_SECONDS = 0.25
+MAX_CAPTURED_TEXT_BYTES = 1_000_000
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -53,6 +55,26 @@ def git_commit(directory: Path) -> str | None:
         return result.stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def git_repository_url(directory: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=directory,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    url = result.stdout.strip()
+    match = re.fullmatch(r"git@([^:]+):(.+)", url)
+    if match:
+        url = f"https://{match.group(1)}/{match.group(2)}"
+    elif url.startswith("ssh://git@"):
+        url = f"https://{url.removeprefix('ssh://git@')}"
+    return url.removesuffix(".git").rstrip("/") or None
 
 
 def scheduler_job_id() -> str | None:
@@ -230,6 +252,7 @@ def import_directory(
         "platform": platform.platform(),
         "scheduler_job_id": scheduler_job_id(),
         "git_commit": values.get("Git_commit_hash") or git_commit(directory),
+        "git_repository_url": git_repository_url(directory),
         "command": command or [],
     }
     run = client.request("POST", "/runs", payload)
@@ -493,6 +516,7 @@ def sync_once(
         digests = getattr(sync_once, "metadata_digest", {})
         digests[run_id] = digest
         sync_once.metadata_digest = digests
+    sync_run_output(client, run_id, directory)
     for batch in tail.poll():
         client.request("POST", f"/runs/{run_id}/thermo", batch)
         tail.ack()
@@ -507,6 +531,46 @@ def sync_once(
         },
     )
     return status
+
+
+def captured_text(path: Path, *, keep_tail: bool) -> tuple[str, bool]:
+    size = path.stat().st_size
+    truncated = size > MAX_CAPTURED_TEXT_BYTES
+    with path.open("rb") as stream:
+        if truncated and keep_tail:
+            stream.seek(size - MAX_CAPTURED_TEXT_BYTES)
+        data = stream.read(MAX_CAPTURED_TEXT_BYTES)
+    return data.decode("utf-8", errors="replace"), truncated
+
+
+def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
+    stdout_path = next(
+        (path for name in ("out.log", "stdout") if (path := directory / name).is_file()),
+        None,
+    )
+    sources = {
+        "stdout": (stdout_path, True),
+        "git_diff": (directory / "diff.patch", False),
+    }
+    digests = getattr(sync_run_output, "digests", {})
+    updates: dict[str, object] = {}
+    pending: dict[tuple[str, str], str] = {}
+    for field, (path, keep_tail) in sources.items():
+        if path is None or not path.is_file():
+            continue
+        text, truncated = captured_text(path, keep_tail=keep_tail)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        key = (run_id, field)
+        if digests.get(key) == digest:
+            continue
+        updates[field] = text
+        updates[f"{field}_truncated"] = truncated
+        pending[key] = digest
+    if not updates:
+        return
+    client.request("PUT", f"/runs/{run_id}/output", updates)
+    digests.update(pending)
+    sync_run_output.digests = digests
 
 
 def process_exists(pid: int) -> bool:

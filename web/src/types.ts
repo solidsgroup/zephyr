@@ -20,6 +20,7 @@ export interface Run {
   platform: string | null;
   scheduler_job_id: string | null;
   git_commit: string | null;
+  git_repository_url: string | null;
   command: string[];
   tags: string[];
   notes: string;
@@ -60,7 +61,16 @@ export interface ThermoSeries {
 export interface RunDetail {
   run: Run;
   metadata: MetadataRecord | null;
+  output: RunOutput | null;
   thermo: ThermoSeries[];
+}
+
+export interface RunOutput {
+  stdout: string;
+  stdout_truncated: boolean;
+  git_diff: string;
+  git_diff_truncated: boolean;
+  updated_at: string;
 }
 
 export interface Artifact {

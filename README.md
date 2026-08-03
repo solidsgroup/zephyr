@@ -55,7 +55,9 @@ zph run --directory /scratch/run-0043 -- alamo input
 
 `zph add` accepts one or more directories, metadata files, or wildcard patterns,
 then recursively discovers every ALAMO `metadata` file beneath the matches. It
-imports the associated metadata, `thermo.dat`, and final status. Shell-expanded
+imports the associated metadata, `thermo.dat`, `out.log`, `diff.patch`, and
+final status. Running watchers refresh the captured terminal output alongside
+the heartbeat. Shell-expanded
 wildcards (`zph add output*`) and quoted patterns (`zph add 'output*'`) both
 work. Its summary distinguishes newly added records from existing records that
 were updated. Color is enabled for interactive terminals and disabled when

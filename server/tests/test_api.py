@@ -32,6 +32,19 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert metadata.json()["values"]["HASH"] == "abc123"
 
+            output = await client.put(
+                f"/api/v1/runs/{run_id}/output",
+                json={
+                    "stdout": "step 1 complete\n",
+                    "stdout_truncated": False,
+                    "git_diff": "diff --git a/a.cpp b/a.cpp\n",
+                    "git_diff_truncated": False,
+                },
+                headers=headers,
+            )
+            assert output.status_code == 200
+            assert output.json()["stdout"] == "step 1 complete\n"
+
             thermo = await client.post(
                 f"/api/v1/runs/{run_id}/thermo",
                 json={
@@ -73,6 +86,7 @@ async def test_run_lifecycle_and_public_project() -> None:
 
             detail = await client.get(f"/api/v1/runs/{run_id}")
             assert detail.json()["thermo"][0]["rows"][1]["values"]["temperature"] == 305.0
+            assert detail.json()["output"]["git_diff"].startswith("diff --git")
 
             deleted_project = await client.delete(f"/api/v1/projects/{project_id}", headers=headers)
             assert deleted_project.status_code == 204
