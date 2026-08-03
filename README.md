@@ -23,7 +23,7 @@ HTTP/JSON contract under `/api/v1`.
 - live run registry with heartbeats and stale-run detection;
 - ALAMO metadata parsing and append-only `thermo.dat` segments;
 - W&B-style run table, run detail, plots, and multi-run comparisons;
-- content-addressed artifacts in any S3-compatible object store;
+- content-addressed working artifacts in a group-owned Google Shared Drive;
 - private, group, and public projects with per-user sharing;
 - Google OIDC restricted to `@solids.group` plus revocable CLI tokens;
 - one-command artifact upload and complete local run restoration.
@@ -75,6 +75,9 @@ uvicorn zephyr_server.main:app --reload
 
 In a second terminal, run `npm --prefix web run dev` and visit
 `http://localhost:5173`. Development login is enabled by `.env.example`.
+Artifact transfers are disabled locally by default; set the three
+`ZEPHYR_ARTIFACT_STORE` and `ZEPHYR_GOOGLE_DRIVE_*` variables to use a
+dedicated development folder when exercising `zph put` and `zph get`.
 
 Run all checks with:
 
@@ -94,6 +97,9 @@ See [architecture](docs/architecture.md),
 Zephyr is intentionally not a scientific postprocessor. ALAMO or a user's
 workflow creates scientific tables and images; Zephyr indexes, visualizes,
 compares, shares, and preserves those outputs.
+
+Google Drive is the collaboration layer for selected working artifacts, not a
+replacement for long-term archival storage of large raw simulation datasets.
 
 ## Status
 

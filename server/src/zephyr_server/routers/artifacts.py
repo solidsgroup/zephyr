@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import pathlib
 import uuid
+from typing import Any
 
-from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import Settings, get_settings
 from ..db import get_db
 from ..dependencies import current_user
 from ..models import ArtifactObject, RunArtifact, User
@@ -17,10 +20,12 @@ from ..schemas import (
     ArtifactInitiated,
     ArtifactRead,
 )
-from ..storage import ObjectStorage, get_storage
+from ..storage import GoogleDriveStorage, StorageError, StoredObjectNotFound, get_storage
 from .runs import get_accessible_run
 
 router = APIRouter(prefix="/runs/{run_id}/artifacts", tags=["artifacts"])
+content_router = APIRouter(prefix="/artifacts", tags=["artifacts"])
+DOWNLOAD_TOKEN_SALT = "zephyr-artifact-download-v1"
 
 
 def safe_relative_path(path: str) -> str:
@@ -46,13 +51,56 @@ def artifact_read(record: RunArtifact, download_url: str | None = None) -> Artif
     )
 
 
+def artifact_download_url(settings: Settings, object_key: str, content_type: str) -> str:
+    serializer = URLSafeTimedSerializer(settings.session_secret, salt=DOWNLOAD_TOKEN_SALT)
+    token = serializer.dumps({"key": object_key, "content_type": content_type})
+    return f"{settings.public_url.rstrip('/')}/api/v1/artifacts/content/{token}"
+
+
+def decode_download_token(settings: Settings, token: str) -> tuple[str, str]:
+    serializer = URLSafeTimedSerializer(settings.session_secret, salt=DOWNLOAD_TOKEN_SALT)
+    try:
+        payload: Any = serializer.loads(token, max_age=settings.download_url_ttl_seconds)
+    except SignatureExpired as error:
+        raise HTTPException(status_code=410, detail="Artifact download link expired") from error
+    except BadSignature as error:
+        raise HTTPException(status_code=404, detail="Artifact download link is invalid") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="Artifact download link is invalid")
+    object_key = payload.get("key")
+    content_type = payload.get("content_type")
+    if not isinstance(object_key, str) or not isinstance(content_type, str):
+        raise HTTPException(status_code=404, detail="Artifact download link is invalid")
+    return object_key, content_type
+
+
+@content_router.get("/content/{token}", include_in_schema=False)
+def artifact_content(
+    token: str,
+    settings: Settings = Depends(get_settings),
+    storage: GoogleDriveStorage = Depends(get_storage),
+) -> StreamingResponse:
+    object_key, content_type = decode_download_token(settings, token)
+    try:
+        content = storage.open_download(object_key)
+    except StoredObjectNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StorageError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return StreamingResponse(
+        content,
+        media_type=content_type,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.post("/initiate", response_model=ArtifactInitiated)
 async def initiate_upload(
     run_id: uuid.UUID,
     payload: ArtifactInitiate,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorage = Depends(get_storage),
+    storage: GoogleDriveStorage = Depends(get_storage),
 ):
     run = await get_accessible_run(db, user, run_id)
     if run.owner_id != user.id:
@@ -60,19 +108,43 @@ async def initiate_upload(
     existing = await db.get(ArtifactObject, payload.sha256)
     if existing and existing.verified:
         return ArtifactInitiated(already_present=True)
-    if existing is None:
-        existing = ArtifactObject(
-            sha256=payload.sha256,
-            size=payload.size,
-            content_type=payload.content_type,
-            object_key=storage.key_for(payload.sha256),
-        )
-        db.add(existing)
-        await db.commit()
-    elif existing.size != payload.size:
+    if existing is not None and existing.size != payload.size:
         raise HTTPException(status_code=409, detail="Digest already exists with a different size")
-    url, headers = storage.presign_put(payload.sha256, payload.content_type)
-    return ArtifactInitiated(already_present=False, upload_url=url, headers=headers)
+    if existing is not None:
+        try:
+            storage.verify(existing.object_key, existing.sha256, existing.size)
+        except StoredObjectNotFound:
+            pass
+        except StorageError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        else:
+            existing.verified = True
+            await db.commit()
+            return ArtifactInitiated(already_present=True)
+    try:
+        target = storage.initiate_upload(
+            payload.sha256,
+            payload.size,
+            payload.content_type,
+            existing.object_key if existing else None,
+        )
+    except StorageError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if existing is None:
+        db.add(
+            ArtifactObject(
+                sha256=payload.sha256,
+                size=payload.size,
+                content_type=payload.content_type,
+                object_key=target.object_key,
+            )
+        )
+        await db.commit()
+    return ArtifactInitiated(
+        already_present=False,
+        upload_url=target.url,
+        headers=target.headers,
+    )
 
 
 @router.post("/complete", response_model=ArtifactRead, status_code=status.HTTP_201_CREATED)
@@ -81,7 +153,7 @@ async def complete_upload(
     payload: ArtifactComplete,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorage = Depends(get_storage),
+    storage: GoogleDriveStorage = Depends(get_storage),
 ):
     run = await get_accessible_run(db, user, run_id)
     if run.owner_id != user.id:
@@ -91,15 +163,11 @@ async def complete_upload(
         raise HTTPException(status_code=409, detail="Upload was not initiated")
     if not obj.verified:
         try:
-            head = storage.head(obj.object_key)
-        except ClientError as error:
+            storage.verify(obj.object_key, obj.sha256, obj.size)
+        except StoredObjectNotFound as error:
             raise HTTPException(status_code=409, detail="Uploaded object was not found") from error
-        if int(head.get("ContentLength", -1)) != obj.size:
-            raise HTTPException(status_code=409, detail="Uploaded object size does not match")
-        if head.get("Metadata", {}).get("sha256") != obj.sha256:
-            raise HTTPException(
-                status_code=409, detail="Uploaded object digest metadata is missing"
-            )
+        except StorageError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         obj.verified = True
 
     path = safe_relative_path(payload.path)
@@ -149,11 +217,14 @@ async def download_artifact(
     artifact_id: uuid.UUID,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorage = Depends(get_storage),
+    settings: Settings = Depends(get_settings),
 ):
     await get_accessible_run(db, user, run_id)
     record = await db.get(RunArtifact, artifact_id)
     if record is None or record.run_id != run_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await db.refresh(record, attribute_names=["object"])
-    return artifact_read(record, storage.presign_get(record.object.object_key))
+    return artifact_read(
+        record,
+        artifact_download_url(settings, record.object.object_key, record.object.content_type),
+    )

@@ -55,7 +55,7 @@ async def protocol_metadata() -> dict[str, object]:
             "runs",
             "metadata",
             "thermo-segments",
-            "artifacts-s3",
+            "artifacts",
             "projects",
             "project-sharing",
             "public-projects",
@@ -73,6 +73,7 @@ for api_router in (
     artifacts.router,
     projects.router,
     views.router,
+    artifacts.content_router,
 ):
     app.include_router(api_router, prefix="/api/v1")
 

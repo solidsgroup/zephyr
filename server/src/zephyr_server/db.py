@@ -7,19 +7,19 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from .config import get_settings
+from .config import database_url_from_environment
 
 
 class Base(DeclarativeBase):
     pass
 
 
-settings = get_settings()
-engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+database_url = database_url_from_environment()
+engine = create_async_engine(database_url, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-if settings.database_url.startswith("sqlite"):
+if database_url.startswith("sqlite"):
 
     @event.listens_for(engine.sync_engine, "connect")
     def enable_sqlite_foreign_keys(dbapi_connection: Any, _: Any) -> None:
@@ -35,7 +35,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 async def create_schema_for_development() -> None:
     """Create tables for SQLite/dev use; production uses Alembic."""
-    if settings.database_url.startswith("sqlite"):
+    if database_url.startswith("sqlite"):
         from . import models  # noqa: F401
 
         async with engine.begin() as connection:

@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from zephyr_server import models  # noqa: F401
-from zephyr_server.config import get_settings
+from zephyr_server.config import database_url_from_environment
 from zephyr_server.db import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", database_url_from_environment())
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

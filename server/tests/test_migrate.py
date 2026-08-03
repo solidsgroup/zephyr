@@ -4,6 +4,7 @@ import pytest
 from alembic.config import Config
 
 from zephyr_server import migrate
+from zephyr_server.config import database_url_from_environment
 
 
 def test_migrate_upgrades_to_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -32,3 +33,14 @@ def test_migrate_reports_missing_config(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     with pytest.raises(FileNotFoundError, match="Alembic configuration not found"):
         migrate.main()
+
+
+def test_database_configuration_does_not_require_app_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ZEPHYR_ENV", "production")
+    monkeypatch.setenv("ZEPHYR_DATABASE_URL", "postgresql://user:pass@db/zephyr")
+    monkeypatch.delenv("ZEPHYR_GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ZEPHYR_GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", raising=False)
+
+    assert database_url_from_environment() == "postgresql+asyncpg://user:pass@db/zephyr"

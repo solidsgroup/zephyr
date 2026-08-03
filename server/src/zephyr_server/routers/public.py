@@ -8,11 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import Project, Run, RunArtifact, RunMetadata, RunProject, ThermoSeries
 from ..schemas import MetadataRead, ProjectRead, ThermoRow, ThermoSeriesRead
-from ..storage import ObjectStorage, get_storage
-from .artifacts import artifact_read
+from .artifacts import artifact_download_url, artifact_read
 from .runs import run_read
 
 router = APIRouter(prefix="/public", tags=["public sharing"])
@@ -67,7 +67,7 @@ async def show_public_run(
     slug: str,
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    storage: ObjectStorage = Depends(get_storage),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     project = await public_project(db, slug)
     run = await db.scalar(
@@ -110,7 +110,12 @@ async def show_public_run(
             for series in thermo
         ],
         "artifacts": [
-            artifact_read(record, storage.presign_get(record.object.object_key))
+            artifact_read(
+                record,
+                artifact_download_url(
+                    settings, record.object.object_key, record.object.content_type
+                ),
+            )
             for record in artifacts
         ],
     }

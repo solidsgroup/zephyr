@@ -21,19 +21,23 @@ an existing PostgreSQL disk.
 2. Create Google OAuth web credentials. Add
    `https://zephyr.solids.group/api/v1/auth/callback/google` as an authorized
    redirect URI and configure the consent screen for the group.
-3. Create a private Cloudflare R2 bucket and an API token scoped only to that
-   bucket.
-4. Fill the unsynchronized `ZEPHYR_GOOGLE_*` and `ZEPHYR_S3_*` secrets in
-   Render. The R2 endpoint is
-   `https://ACCOUNT_ID.r2.cloudflarestorage.com`; the region remains `auto`.
-5. Point the `zephyr.solids.group` DNS record as Render instructs and verify the
+3. Enable the Google Drive API in the Zephyr Google Cloud project and create a
+   `zephyr-artifacts` service account with a JSON key.
+4. Create a `Zephyr Artifacts` folder in a group-owned Shared Drive. Add the
+   service account's email as a Content manager and copy the folder ID from its
+   browser URL.
+5. Fill the unsynchronized Google secrets in Render. Store the entire service
+   account key JSON in `ZEPHYR_GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`, and store the
+   folder ID in `ZEPHYR_GOOGLE_DRIVE_FOLDER_ID`.
+6. Point the `zephyr.solids.group` DNS record as Render instructs and verify the
    custom domain certificate.
-6. Enable PostgreSQL recovery/backup options and R2 object versioning before
-   treating Zephyr as an archive.
+7. Enable PostgreSQL recovery and establish separate archival deposition for
+   large datasets before treating Zephyr as a definitive archive.
 
-The service needs no persistent Render disk. Uploaded bytes travel directly
-between clients and R2 with short-lived signed URLs; the web process only
-verifies object headers and writes manifests.
+The service needs no persistent Render disk. Uploads travel directly from `zph`
+to a resumable Google Drive session. Downloads are streamed through Zephyr using
+short-lived signed links so private and public project access remains governed
+by Zephyr rather than Drive sharing settings.
 
 ## Operational checks
 

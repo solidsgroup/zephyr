@@ -4,19 +4,20 @@ Zephyr is a monorepo with hard package boundaries:
 
 ```text
 ALAMO / zph
-      │  HTTPS JSON + presigned object transfers
+      │  HTTPS JSON + resumable artifact uploads
       ▼
 FastAPI service ───────── React dashboard
       │                         │
       ├── PostgreSQL catalog    └── same-origin session
-      └── S3-compatible object storage
+      └── Google Shared Drive
 ```
 
 The API process is stateless. PostgreSQL is the authoritative catalog for
 users, runs, projects, provenance, telemetry indexes, and artifact manifests.
-Object bytes are immutable and content-addressed by SHA-256 in Cloudflare R2
-(MinIO locally). A run artifact is a versioned logical path pointing to one of
-those objects, so duplicate uploads cost no extra storage.
+Selected working artifact bytes are immutable and content-addressed by SHA-256
+in a group-owned Google Shared Drive. A run artifact is a versioned logical path
+pointing to one of those files, so duplicate uploads cost no extra storage.
+Drive file IDs are implementation details and are never used as run identity.
 
 ## Run identity and state
 
@@ -42,14 +43,14 @@ HMAC-SHA256 digest, individually revocable, and never placed in run directories.
 Runs are private to their owner unless attached to a project. Private projects
 use explicit memberships, group projects are readable by authenticated group
 members, and public projects expose a deliberately separate read-only API.
-Object downloads remain short-lived presigned URLs.
+Artifact downloads use short-lived Zephyr-signed URLs. Zephyr streams the bytes
+from Drive so Drive membership and credentials are never exposed to clients.
 
 ## Data lifecycle
 
 Working records remain until their owner explicitly deletes them. A run deletion
-removes its catalog, telemetry, and artifact links; unreferenced immutable object
-bytes remain quarantined for a future garbage-collection policy. External archival
-deposition is deliberately deferred until retention and recovery semantics are
-agreed upon. Before production archival claims are made, enable
-Render PostgreSQL point-in-time recovery and R2 object versioning/lifecycle
-controls, then test restoration on a schedule.
+removes its catalog, telemetry, and artifact links; unreferenced immutable Drive
+files remain quarantined for a future garbage-collection policy. Drive is for
+images, logs, inputs, checkpoints, and modest result bundles that benefit from
+collaboration. Large raw datasets and definitive archival copies remain outside
+Zephyr until retention, deposition, and recovery semantics are agreed upon.

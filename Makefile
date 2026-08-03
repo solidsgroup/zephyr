@@ -1,7 +1,7 @@
 .PHONY: dev infra migrate test lint build
 
 infra:
-	docker compose up -d postgres minio minio-init
+	docker compose up -d postgres
 
 migrate:
 	alembic -c server/alembic.ini upgrade head
