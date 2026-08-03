@@ -1,0 +1,98 @@
+import uuid
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from zephyr_server.db import SessionLocal
+from zephyr_server.main import app
+from zephyr_server.models import ArtifactObject, RunArtifact
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_run_list_previews_and_selected_thumbnail() -> None:
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            await client.post("/api/v1/auth/dev-login")
+            me = await client.get("/api/v1/auth/me")
+            headers = {"X-CSRF-Token": me.json()["csrf_token"]}
+            created = await client.post(
+                "/api/v1/runs",
+                json={"name": "Thumbnail test", "alamo_hash": f"thumb-{uuid.uuid4()}"},
+                headers=headers,
+            )
+            run_id = uuid.UUID(created.json()["id"])
+
+            async with SessionLocal() as db:
+                records: list[RunArtifact] = []
+                for index, (name, kind, content_type) in enumerate(
+                    [
+                        ("pressure.png", "image", "image/png"),
+                        ("temperature.png", "image", "image/png"),
+                        ("solver.log", "log", "text/plain"),
+                        ("temperature.png", "image", "image/png"),
+                    ],
+                    start=1,
+                ):
+                    digest = f"{index:064x}"
+                    obj = ArtifactObject(
+                        sha256=digest,
+                        size=index * 100,
+                        content_type=content_type,
+                        object_key=f"thumbnail-test-{run_id}-{index}",
+                        verified=True,
+                    )
+                    record = RunArtifact(
+                        run_id=run_id,
+                        object_sha256=digest,
+                        logical_name=name,
+                        path=name,
+                        version=2 if index == 4 else 1,
+                        kind=kind,
+                    )
+                    db.add_all([obj, record])
+                    records.append(record)
+                await db.commit()
+                pressure_id = str(records[0].id)
+                selected_id = str(records[1].id)
+                log_id = str(records[2].id)
+                latest_temperature_id = str(records[3].id)
+
+            listing = await client.get("/api/v1/runs")
+            listed = next(run for run in listing.json() if run["id"] == str(run_id))
+            assert listed["artifact_count"] == 3
+            assert len(listed["artifact_previews"]) == 3
+            assert {preview["id"] for preview in listed["artifact_previews"][:2]} == {
+                pressure_id,
+                latest_temperature_id,
+            }
+            assert listed["artifact_previews"][0]["download_url"].startswith(
+                f"/api/v1/runs/{run_id}/artifacts/"
+            )
+            assert listed["artifact_previews"][0]["download_url"].endswith("/content")
+
+            selected = await client.put(
+                f"/api/v1/runs/{run_id}/artifacts/{selected_id}/thumbnail",
+                headers=headers,
+            )
+            assert selected.status_code == 200
+            assert selected.json()["thumbnail_artifact_id"] == selected_id
+
+            listing = await client.get("/api/v1/runs")
+            listed = next(run for run in listing.json() if run["id"] == str(run_id))
+            assert listed["artifact_previews"][0]["id"] == selected_id
+            assert latest_temperature_id not in {
+                preview["id"] for preview in listed["artifact_previews"]
+            }
+
+            rejected = await client.put(
+                f"/api/v1/runs/{run_id}/artifacts/{log_id}/thumbnail",
+                headers=headers,
+            )
+            assert rejected.status_code == 422
+
+            deleted = await client.delete(f"/api/v1/runs/{run_id}", headers=headers)
+            assert deleted.status_code == 204

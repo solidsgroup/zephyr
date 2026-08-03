@@ -24,16 +24,21 @@ def metadata_digest(text: str) -> str:
 
 def derived_status(values: dict[str, str]) -> tuple[str, int | None]:
     raw = values.get("Status", values.get("STATUS", "")).strip().lower()
+    match = re.fullmatch(r"([^()]+?)(?:\s*\((\d+)%\))?", raw)
+    source = match.group(1).strip() if match else raw
     mapping = {
         "running": "running",
         "complete": "completed",
         "completed": "completed",
         "failed": "failed",
         "error": "failed",
+        "abort": "failed",
+        "segfault": "failed",
+        "interrupt": "interrupted",
         "interrupted": "interrupted",
     }
-    status = mapping.get(raw, "running")
-    progress = None
+    status = mapping.get(source, "running")
+    progress = int(match.group(2)) if match and match.group(2) else None
     raw_progress = values.get("Progress", values.get("PROGRESS"))
     if raw_progress:
         try:

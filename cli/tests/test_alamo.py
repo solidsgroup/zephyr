@@ -7,13 +7,25 @@ from zephyr_cli import main
 from zephyr_cli.alamo import ThermoTail, derived_status, metadata_values
 from zephyr_cli.config import Credentials
 from zephyr_cli.main import final_watch_status
-from zephyr_cli.workspace import RunMarker
 
 
 def test_metadata_values_and_status() -> None:
     values = metadata_values("HASH = abc123\nStatus: complete\nProgress = 100%\n")
     assert values["HASH"] == "abc123"
     assert derived_status(values) == ("completed", 100)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Status = Running (42%)\n", ("running", 42)),
+        ("Status = Segfault\n", ("failed", None)),
+        ("Status = Abort\n", ("failed", None)),
+        ("Status = Interrupt\n", ("interrupted", None)),
+    ],
+)
+def test_alamo_terminal_statuses(raw: str, expected: tuple[str, int | None]) -> None:
+    assert derived_status(metadata_values(raw)) == expected
 
 
 def test_thermo_tail_reads_only_appended_rows(tmp_path: Path) -> None:
@@ -82,7 +94,7 @@ def test_watcher_that_starts_after_alamo_finishes_posts_completed(
             if (method, path) == ("POST", "/runs"):
                 assert isinstance(payload, dict)
                 assert payload["status"] == "completed"
-                return {"id": "fast-run-id"}
+                return {"id": "fast-run-id", "alamo_hash": "fast-run"}
             return {}
 
     monkeypatch.setattr(
@@ -103,7 +115,7 @@ def test_watcher_that_starts_after_alamo_finishes_posts_completed(
         )
     )
 
-    assert RunMarker.load(tmp_path).run_id == "fast-run-id"
+    assert not (tmp_path / ".zephyr.json").exists()
     terminal_heartbeats = [
         payload
         for method, path, payload in requests

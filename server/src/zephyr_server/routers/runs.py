@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +16,7 @@ from ..models import (
     Project,
     ProjectMembership,
     Run,
+    RunArtifact,
     RunMetadata,
     RunProject,
     ThermoPoint,
@@ -25,6 +26,7 @@ from ..models import (
     utcnow,
 )
 from ..schemas import (
+    ArtifactPreview,
     Heartbeat,
     MetadataRead,
     MetadataWrite,
@@ -46,10 +48,112 @@ def effective_status(run: Run) -> str:
     return run.status
 
 
-def run_read(run: Run) -> RunRead:
+def run_read(
+    run: Run,
+    artifact_count: int = 0,
+    artifact_previews: list[ArtifactPreview] | None = None,
+) -> RunRead:
     data = {column.name: getattr(run, column.name) for column in Run.__table__.columns}
     data["effective_status"] = effective_status(run)
+    data["artifact_count"] = artifact_count
+    data["artifact_previews"] = artifact_previews or []
     return RunRead.model_validate(data)
+
+
+def is_preview_image(record: RunArtifact) -> bool:
+    return record.kind == "image" and record.object.content_type.startswith("image/")
+
+
+def artifact_preview(record: RunArtifact) -> ArtifactPreview:
+    return ArtifactPreview(
+        id=record.id,
+        logical_name=record.logical_name,
+        path=record.path,
+        kind=record.kind,
+        content_type=record.object.content_type,
+        download_url=(
+            f"/api/v1/runs/{record.run_id}/artifacts/{record.id}/content"
+            if is_preview_image(record)
+            else None
+        ),
+    )
+
+
+async def artifact_previews_for_runs(
+    db: AsyncSession,
+    runs: list[Run],
+) -> dict[uuid.UUID, tuple[int, list[ArtifactPreview]]]:
+    if not runs:
+        return {}
+    run_ids = [run.id for run in runs]
+    latest_versions = (
+        select(
+            RunArtifact.run_id.label("run_id"),
+            RunArtifact.path.label("path"),
+            func.max(RunArtifact.version).label("version"),
+        )
+        .where(RunArtifact.run_id.in_(run_ids))
+        .group_by(RunArtifact.run_id, RunArtifact.path)
+        .subquery()
+    )
+    current = list(
+        await db.scalars(
+            select(RunArtifact)
+            .join(
+                latest_versions,
+                and_(
+                    RunArtifact.run_id == latest_versions.c.run_id,
+                    RunArtifact.path == latest_versions.c.path,
+                    RunArtifact.version == latest_versions.c.version,
+                ),
+            )
+            .options(selectinload(RunArtifact.object))
+        )
+    )
+    by_run: dict[uuid.UUID, list[RunArtifact]] = {}
+    by_id = {record.id: record for record in current}
+    for record in current:
+        by_run.setdefault(record.run_id, []).append(record)
+
+    selected_ids = {
+        run.thumbnail_artifact_id
+        for run in runs
+        if run.thumbnail_artifact_id and run.thumbnail_artifact_id not in by_id
+    }
+    if selected_ids:
+        selected = list(
+            await db.scalars(
+                select(RunArtifact)
+                .where(RunArtifact.id.in_(selected_ids))
+                .options(selectinload(RunArtifact.object))
+            )
+        )
+        by_id.update((record.id, record) for record in selected)
+
+    result: dict[uuid.UUID, tuple[int, list[ArtifactPreview]]] = {}
+    for run in runs:
+        records = by_run.get(run.id, [])
+        records.sort(
+            key=lambda record: (
+                not is_preview_image(record),
+                -record.updated_at.timestamp(),
+                record.path,
+            )
+        )
+        chosen: list[RunArtifact] = []
+        if (
+            run.thumbnail_artifact_id
+            and (selected := by_id.get(run.thumbnail_artifact_id))
+            and selected.run_id == run.id
+        ):
+            chosen.append(selected)
+        chosen_paths = {record.path for record in chosen}
+        chosen.extend(record for record in records if record.path not in chosen_paths)
+        result[run.id] = (
+            len(records),
+            [artifact_preview(record) for record in chosen[:3]],
+        )
+    return result
 
 
 def accessible_run_ids(user: User):
@@ -94,7 +198,8 @@ async def list_runs(
             or_(Run.name.ilike(f"%{escaped}%"), Run.alamo_hash.ilike(f"%{escaped}%"))
         )
     runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
-    return [run_read(run) for run in runs]
+    previews = await artifact_previews_for_runs(db, runs)
+    return [run_read(run, *previews.get(run.id, (0, []))) for run in runs]
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)

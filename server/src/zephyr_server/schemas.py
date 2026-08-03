@@ -87,6 +87,15 @@ class RunUpdate(BaseModel):
     notes: str | None = None
 
 
+class ArtifactPreview(BaseModel):
+    id: uuid.UUID
+    logical_name: str
+    path: str
+    kind: str
+    content_type: str
+    download_url: str | None = None
+
+
 class RunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -106,6 +115,9 @@ class RunRead(BaseModel):
     command: list[str]
     tags: list[str]
     notes: str
+    thumbnail_artifact_id: uuid.UUID | None
+    artifact_count: int = 0
+    artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

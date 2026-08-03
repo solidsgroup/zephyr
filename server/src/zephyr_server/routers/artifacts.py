@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import pathlib
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..artifact_links import artifact_download_url, decode_download_token
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..dependencies import current_user
@@ -19,13 +18,13 @@ from ..schemas import (
     ArtifactInitiate,
     ArtifactInitiated,
     ArtifactRead,
+    RunRead,
 )
 from ..storage import GoogleDriveStorage, StorageError, StoredObjectNotFound, get_storage
-from .runs import get_accessible_run
+from .runs import get_accessible_run, run_read
 
 router = APIRouter(prefix="/runs/{run_id}/artifacts", tags=["artifacts"])
 content_router = APIRouter(prefix="/artifacts", tags=["artifacts"])
-DOWNLOAD_TOKEN_SALT = "zephyr-artifact-download-v1"
 
 
 def safe_relative_path(path: str) -> str:
@@ -49,29 +48,6 @@ def artifact_read(record: RunArtifact, download_url: str | None = None) -> Artif
         derivation=record.derivation,
         download_url=download_url,
     )
-
-
-def artifact_download_url(settings: Settings, object_key: str, content_type: str) -> str:
-    serializer = URLSafeTimedSerializer(settings.session_secret, salt=DOWNLOAD_TOKEN_SALT)
-    token = serializer.dumps({"key": object_key, "content_type": content_type})
-    return f"{settings.public_url.rstrip('/')}/api/v1/artifacts/content/{token}"
-
-
-def decode_download_token(settings: Settings, token: str) -> tuple[str, str]:
-    serializer = URLSafeTimedSerializer(settings.session_secret, salt=DOWNLOAD_TOKEN_SALT)
-    try:
-        payload: Any = serializer.loads(token, max_age=settings.download_url_ttl_seconds)
-    except SignatureExpired as error:
-        raise HTTPException(status_code=410, detail="Artifact download link expired") from error
-    except BadSignature as error:
-        raise HTTPException(status_code=404, detail="Artifact download link is invalid") from error
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=404, detail="Artifact download link is invalid")
-    object_key = payload.get("key")
-    content_type = payload.get("content_type")
-    if not isinstance(object_key, str) or not isinstance(content_type, str):
-        raise HTTPException(status_code=404, detail="Artifact download link is invalid")
-    return object_key, content_type
 
 
 @content_router.get("/content/{token}", include_in_schema=False)
@@ -209,6 +185,56 @@ async def list_artifacts(
     for record in records:
         await db.refresh(record, attribute_names=["object"])
     return [artifact_read(record) for record in records]
+
+
+@router.put("/{artifact_id}/thumbnail", response_model=RunRead)
+async def select_thumbnail(
+    run_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await get_accessible_run(db, user, run_id)
+    if run.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can select a thumbnail")
+    record = await db.get(RunArtifact, artifact_id)
+    if record is None or record.run_id != run.id:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    await db.refresh(record, attribute_names=["object"])
+    if record.kind != "image" or not record.object.content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail="Only image artifacts can be thumbnails")
+    run.thumbnail_artifact_id = record.id
+    await db.commit()
+    await db.refresh(run)
+    return run_read(run)
+
+
+@router.get("/{artifact_id}/content", include_in_schema=False)
+async def preview_artifact_content(
+    run_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: GoogleDriveStorage = Depends(get_storage),
+) -> StreamingResponse:
+    await get_accessible_run(db, user, run_id)
+    record = await db.get(RunArtifact, artifact_id)
+    if record is None or record.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    await db.refresh(record, attribute_names=["object"])
+    if record.kind != "image" or not record.object.content_type.startswith("image/"):
+        raise HTTPException(status_code=404, detail="Image preview not found")
+    try:
+        content = storage.open_download(record.object.object_key)
+    except StoredObjectNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StorageError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return StreamingResponse(
+        content,
+        media_type=record.object.content_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/{artifact_id}/download", response_model=ArtifactRead)

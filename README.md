@@ -23,6 +23,7 @@ HTTP/JSON contract under `/api/v1`.
 - live run registry with heartbeats and stale-run detection;
 - ALAMO metadata parsing and append-only `thermo.dat` segments;
 - W&B-style run table, run detail, plots, and multi-run comparisons;
+- stacked artifact previews with a user-selected image thumbnail for each run;
 - content-addressed working artifacts in a group-owned Google Shared Drive;
 - private, group, and public projects with per-user sharing;
 - Google OIDC restricted to `@solids.group` plus revocable CLI tokens;
@@ -46,21 +47,39 @@ wrap a new execution:
 
 ```console
 zph import /scratch/run-0042
+zph add /scratch/alamo-results
+zph add 'output*'
 zph watch /scratch/run-0042 --pid 38192
 zph run --directory /scratch/run-0043 -- alamo input
 ```
+
+`zph add` accepts one or more directories, metadata files, or wildcard patterns,
+then recursively discovers every ALAMO `metadata` file beneath the matches. It
+imports the associated metadata, `thermo.dat`, and final status. Shell-expanded
+wildcards (`zph add output*`) and quoted patterns (`zph add 'output*'`) both
+work. Its summary distinguishes newly added records from existing records that
+were updated. Color is enabled for interactive terminals and disabled when
+output is piped or `NO_COLOR` is set.
 
 Upload and restore results:
 
 ```console
 zph put '*.png' 'profiles/*.csv'
+zph put output/myfile.png
 zph list --status running
-zph compare RUN_ID_A RUN_ID_B
-zph get RUN_ID --output restored-run
+zph compare HASH_A HASH_B
+zph get HASH --output restored-run
 ```
 
+By default, `zph put` associates each file with the `metadata` file in that
+file's directory. Files from several output directories can be supplied in one
+command and are grouped by run automatically. Use `--directory RUN_DIRECTORY`
+to explicitly associate every target with a single run instead.
+
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
-CI. Local run identity lives in `.zephyr.json`; credentials never do.
+CI. Locally, the `HASH` in ALAMO's `metadata` file is the complete run identity;
+Zephyr does not add a marker file to simulation directories, and credentials
+never live there.
 
 ALAMO authenticates `zph` as part of configuration, then starts the watcher only
 for simulations given the boolean `--post` flag:

@@ -72,6 +72,12 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .run-name a { color: #101828; font-weight: 650; text-decoration: none; font-size: 13px; }
 .run-name a:hover { color: var(--blue); }
 .run-name small { font: 9px "DM Mono", monospace; color: #98a2b3; margin-top: 2px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.run-preview-stack { position: relative; width: 72px; height: 42px; }
+.run-preview-card { --stack-index: 0; position: absolute; left: calc(var(--stack-index) * 9px); top: calc(var(--stack-index) * 2px); width: 48px; height: 38px; border: 2px solid white; border-radius: 7px; overflow: hidden; display: grid; place-items: center; background: #edf1f6; color: #7c8aa2; box-shadow: 0 2px 7px #10182824; z-index: calc(4 - var(--stack-index)); }
+.run-preview-card.selected { border-color: #84adff; box-shadow: 0 0 0 1px #246bfd, 0 3px 8px #1018282b; }
+.run-preview-card img { width: 100%; height: 100%; object-fit: cover; }
+.run-preview-card span { font-size: 18px; }
+.run-preview-stack > small { position: absolute; right: 0; bottom: -1px; z-index: 6; background: #344054; color: white; border: 2px solid white; border-radius: 99px; min-width: 19px; padding: 1px 4px; font-size: 8px; text-align: center; }
 .status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 8px; font-size: 10px; font-weight: 700; text-transform: capitalize; background: #f2f4f7; color: #475467; }
 .status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .status-running, .status-starting { background: #eaf1ff; color: #175cd3; }
@@ -122,12 +128,17 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .section-heading { margin: 8px 0 15px; }
 .artifact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 13px; margin-bottom: 24px; }
 .artifact-card { min-width: 0; background: white; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; grid-template-columns: 68px minmax(0, 1fr) 34px; align-items: center; padding-right: 8px; color: inherit; text-decoration: none; }
+.artifact-card[data-thumbnail="true"] { border-color: #84adff; box-shadow: 0 0 0 2px #dbe8ff; }
 .artifact-preview { height: 68px; display: grid; place-items: center; background: #f0f3f7; color: #7c8aa2; font-size: 24px; overflow: hidden; }
 .artifact-preview img { width: 100%; height: 100%; object-fit: cover; }
 .artifact-info { min-width: 0; display: flex; flex-direction: column; padding: 0 10px; }
 .artifact-info strong, .artifact-info small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .artifact-info strong { font-size: 11px; }
 .artifact-info small { color: #98a2b3; font-size: 8px; margin-top: 4px; }
+.thumbnail-choice { align-self: flex-start; border: 0; background: transparent; color: #667085; padding: 5px 0 0; font-size: 8px; font-weight: 700; }
+.thumbnail-choice:hover { color: var(--blue); }
+.thumbnail-choice.active { color: #175cd3; }
+.thumbnail-choice:disabled { cursor: default; }
 .icon-button { border: 0; background: transparent; color: #667085; font-size: 18px; padding: 4px; }
 .icon-button:hover { color: var(--blue); }
 .icon-button.danger:hover { color: #b42318; }

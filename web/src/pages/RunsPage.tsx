@@ -17,6 +17,34 @@ function age(value: string | null) {
   return `${Math.round(seconds / 86400)}d ago`;
 }
 
+function artifactGlyph(kind: string) {
+  if (kind === "table") return "▦";
+  if (kind === "log") return "≡";
+  if (kind === "checkpoint") return "◫";
+  return "◇";
+}
+
+export function ArtifactStack({ run }: { run: Run }) {
+  if (!run.artifact_previews.length) return <span className="muted">—</span>;
+  return (
+    <div className="run-preview-stack" aria-label={`${run.artifact_count} artifacts`}>
+      {run.artifact_previews.map((artifact, index) => (
+        <div
+          className={`run-preview-card${artifact.id === run.thumbnail_artifact_id ? " selected" : ""}`}
+          key={artifact.id}
+          style={{ "--stack-index": index } as React.CSSProperties}
+          title={artifact.logical_name}
+        >
+          {artifact.kind === "image" && artifact.download_url
+            ? <img loading="lazy" src={artifact.download_url} alt={artifact.logical_name} />
+            : <span>{artifactGlyph(artifact.kind)}</span>}
+        </div>
+      ))}
+      {run.artifact_count > run.artifact_previews.length && <small>+{run.artifact_count - run.artifact_previews.length}</small>}
+    </div>
+  );
+}
+
 export default function RunsPage() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
@@ -38,6 +66,7 @@ export default function RunsPage() {
       cell: ({ row }) => <input aria-label={`select ${row.original.name}`} type="checkbox" checked={row.getIsSelected()} onChange={row.getToggleSelectedHandler()} onClick={(event) => event.stopPropagation()} />,
       size: 36,
     }),
+    column.display({ id: "preview", header: "Artifacts", cell: ({ row }) => <ArtifactStack run={row.original} />, size: 88 }),
     column.accessor("name", { header: "Run", cell: ({ row, getValue }) => <div className="run-name"><Link href={`/runs/${row.original.id}`}>{getValue()}</Link><small>{row.original.alamo_hash ?? row.original.id}</small></div> }),
     column.accessor("effective_status", { header: "Status", cell: (info) => <StatusPill status={info.getValue()} /> }),
     column.accessor("progress", { header: "Progress", cell: ({ getValue }) => getValue() == null ? <span className="muted">—</span> : <div className="progress-cell"><span><i style={{ width: `${getValue()}%` }} /></span>{getValue()}%</div> }),
@@ -68,7 +97,7 @@ export default function RunsPage() {
       </div>
       <section className="panel table-panel">
         {runs.isPending ? <div className="center-state"><span className="spinner" />Loading runs…</div> : runs.isError ? <div className="error-panel">Could not load runs.</div> :
-          <div className="table-scroll"><table className="data-table runs-table"><thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} style={{ width: header.getSize() }}>{flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected()} onClick={() => navigate(`/runs/${row.original.id}`)}>{row.getVisibleCells().map((cell) => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}{!data.length && <tr><td colSpan={7}><div className="empty-panel">No runs match this view. Start with <code>zph import .</code></div></td></tr>}</tbody></table></div>}
+          <div className="table-scroll"><table className="data-table runs-table"><thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} style={{ width: header.getSize() }}>{flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected()} onClick={() => navigate(`/runs/${row.original.id}`)}>{row.getVisibleCells().map((cell) => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}{!data.length && <tr><td colSpan={8}><div className="empty-panel">No runs match this view. Start with <code>zph import .</code></div></td></tr>}</tbody></table></div>}
       </section>
     </>
   );

@@ -16,16 +16,25 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from . import __version__
 from .alamo import ThermoTail, derived_status, metadata_digest, metadata_values
 from .client import ApiError, Client, api_request
 from .config import ConfigError, Credentials, normalize_server_url
-from .workspace import RunMarker, WorkspaceError
+from .workspace import WorkspaceError
 
 TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 WATCH_LOCAL_POLL_SECONDS = 0.25
+
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_DIM = "\033[2m"
+ANSI_RED = "\033[31m"
+ANSI_GREEN = "\033[32m"
+ANSI_YELLOW = "\033[33m"
+ANSI_BLUE = "\033[34m"
+ANSI_CYAN = "\033[36m"
 
 
 def utcnow() -> str:
@@ -125,14 +134,23 @@ def credentials_for_server(
     return credentials
 
 
-def client_for_workspace(directory: Path | None = None) -> tuple[Client, RunMarker | None]:
-    credentials = credentials_for_server()
-    marker = RunMarker.load(directory) if directory is not None else None
-    if marker and marker.server.rstrip("/") != credentials.server.rstrip("/"):
-        raise WorkspaceError(
-            f"This run belongs to {marker.server}, but zph is configured for {credentials.server}"
-        )
-    return Client(credentials), marker
+def configured_client() -> Client:
+    return Client(credentials_for_server())
+
+
+def color_enabled(stream: TextIO | None = None) -> bool:
+    stream = stream or sys.stdout
+    if "NO_COLOR" in os.environ:
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return stream.isatty() and os.environ.get("TERM") != "dumb"
+
+
+def paint(text: str, *styles: str, enabled: bool) -> str:
+    if not enabled or not styles:
+        return text
+    return f"{''.join(styles)}{text}{ANSI_RESET}"
 
 
 def read_metadata(directory: Path) -> tuple[str, dict[str, str]]:
@@ -143,16 +161,66 @@ def read_metadata(directory: Path) -> tuple[str, dict[str, str]]:
     return text, metadata_values(text)
 
 
+def require_alamo_hash(directory: Path) -> str:
+    _, values = read_metadata(directory)
+    alamo_hash = values.get("HASH") or values.get("Hash")
+    if not alamo_hash:
+        raise WorkspaceError(f"No HASH found in {directory.resolve() / 'metadata'}")
+    return alamo_hash
+
+
+def runs_by_hash(client: Client, alamo_hash: str) -> list[dict[str, Any]]:
+    runs = client.request(
+        "GET",
+        "/runs",
+        query=[("search", alamo_hash), ("limit", "1000")],
+    )
+    return [run for run in runs if run.get("alamo_hash") == alamo_hash]
+
+
+def lookup_run_by_hash(client: Client, alamo_hash: str) -> dict[str, Any] | None:
+    matches = runs_by_hash(client, alamo_hash)
+    if len(matches) > 1:
+        raise WorkspaceError(
+            f"More than one accessible Zephyr run has HASH {alamo_hash}; "
+            "remove the duplicate before continuing"
+        )
+    return matches[0] if matches else None
+
+
+def lookup_owned_run_by_hash(
+    client: Client,
+    alamo_hash: str,
+    owner_id: str,
+) -> dict[str, Any] | None:
+    matches = [
+        run for run in runs_by_hash(client, alamo_hash) if str(run.get("owner_id")) == owner_id
+    ]
+    if len(matches) > 1:
+        raise WorkspaceError(f"More than one owned Zephyr run has HASH {alamo_hash}")
+    return matches[0] if matches else None
+
+
+def find_run_by_hash(client: Client, alamo_hash: str) -> dict[str, Any]:
+    run = lookup_run_by_hash(client, alamo_hash)
+    if run is None:
+        raise WorkspaceError(f"No Zephyr run found for HASH {alamo_hash}")
+    return run
+
+
 def import_directory(
     client: Client,
     directory: Path,
     name: str | None = None,
     status: str = "starting",
     command: list[str] | None = None,
+    allow_missing_hash: bool = False,
 ) -> dict[str, Any]:
     directory = directory.resolve()
     text, values = read_metadata(directory)
     alamo_hash = values.get("HASH") or values.get("Hash")
+    if not alamo_hash and not allow_missing_hash:
+        raise WorkspaceError(f"No HASH found in {directory / 'metadata'}")
     payload = {
         "alamo_hash": alamo_hash,
         "name": name or values.get("Title") or directory.name,
@@ -165,8 +233,6 @@ def import_directory(
         "command": command or [],
     }
     run = client.request("POST", "/runs", payload)
-    marker = RunMarker(run_id=run["id"], server=client.server)
-    marker.save(directory)
     if text:
         client.request("PUT", f"/runs/{run['id']}/metadata", {"raw_text": text})
     return run
@@ -197,14 +263,221 @@ def cmd_login(args: argparse.Namespace) -> None:
 
 def cmd_import(args: argparse.Namespace) -> None:
     directory = Path(args.directory)
-    client, _ = client_for_workspace()
+    client = configured_client()
     run = import_directory(client, directory, args.name, status=args.status)
-    print(f"{run['id']}  {run['name']}")
+    print(f"{run['alamo_hash']}  {run['name']}")
+
+
+def expand_add_paths(patterns: list[str]) -> list[Path]:
+    matches: list[Path] = []
+    unmatched: list[str] = []
+    for pattern in patterns or ["."]:
+        expanded = str(Path(pattern).expanduser())
+        literal = Path(expanded)
+        if literal.exists():
+            found = [expanded]
+        else:
+            found = sorted(glob.glob(expanded, recursive=True))
+        if not found:
+            unmatched.append(pattern)
+            continue
+        matches.extend(Path(match).resolve() for match in found)
+    if unmatched:
+        raise WorkspaceError(f"No paths matched: {', '.join(unmatched)}")
+    return list(dict.fromkeys(matches))
+
+
+def discover_run_directories(path: Path) -> tuple[Path, list[Path]]:
+    try:
+        target = path.expanduser().resolve(strict=True)
+    except OSError as error:
+        raise WorkspaceError(f"Cannot scan {path}: {error}") from error
+
+    if target.is_file():
+        if target.name != "metadata":
+            raise WorkspaceError(f"{target} is not an ALAMO metadata file")
+        return target.parent, [target.parent]
+    if not target.is_dir():
+        raise WorkspaceError(f"{target} is not a directory")
+
+    try:
+        directories = {
+            metadata.parent.resolve()
+            for metadata in target.rglob("metadata")
+            if metadata.is_file()
+        }
+    except OSError as error:
+        raise WorkspaceError(f"Cannot scan {target}: {error}") from error
+    return target, sorted(directories, key=lambda directory: str(directory))
+
+
+def display_run_path(directory: Path, root: Path) -> str:
+    try:
+        relative = directory.relative_to(root)
+    except ValueError:
+        return str(directory)
+    return "." if relative == Path(".") else str(relative)
+
+
+def status_style(status: str) -> str:
+    if status == "completed":
+        return ANSI_GREEN
+    if status == "failed":
+        return ANSI_RED
+    if status == "interrupted":
+        return ANSI_YELLOW
+    return ANSI_BLUE
+
+
+def print_add_record(
+    action: str,
+    alamo_hash: str,
+    status: str,
+    directory: str,
+    *,
+    color: bool,
+    detail: str | None = None,
+) -> None:
+    appearances = {
+        "ADDED": ("●", ANSI_GREEN),
+        "UPDATED": ("↻", ANSI_CYAN),
+        "SKIPPED": ("○", ANSI_YELLOW),
+        "ERROR": ("×", ANSI_RED),
+    }
+    symbol, action_color = appearances[action]
+    prefix = paint(f"{symbol} {action:<8}", ANSI_BOLD, action_color, enabled=color)
+    identity = paint(f"{alamo_hash:>20}", ANSI_BOLD, enabled=color)
+    state = paint(f"{status:<11}", status_style(status), enabled=color)
+    location = paint(directory, ANSI_DIM, enabled=color)
+    suffix = f"  {paint(detail, action_color, enabled=color)}" if detail else ""
+    print(f"  {prefix}  {identity}  {state}  {location}{suffix}")
+
+
+def cmd_add(args: argparse.Namespace) -> None:
+    color = color_enabled()
+    rule = "─" * 72
+    patterns = args.paths or ["."]
+    request_label = " ".join(patterns)
+    print()
+    print(
+        f"  {paint('ZEPHYR', ANSI_BOLD, ANSI_CYAN, enabled=color)}"
+        f"  {paint('recursive add', ANSI_DIM, enabled=color)}"
+    )
+    print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+    print(f"  Scan   {paint(request_label, ANSI_BOLD, enabled=color)}", flush=True)
+    targets = expand_add_paths(patterns)
+    roots: list[Path] = []
+    discovered: set[Path] = set()
+    ignored: list[Path] = []
+    for target in targets:
+        if target.is_file() and target.name != "metadata":
+            ignored.append(target)
+            continue
+        root, directories = discover_run_directories(target)
+        roots.append(root)
+        discovered.update(directories)
+    directories = sorted(discovered, key=str)
+    if roots:
+        root = Path(os.path.commonpath([str(item) for item in roots]))
+    else:
+        root = Path(os.path.commonpath([str(item.parent) for item in targets]))
+    print(f"  Match  {paint(str(len(targets)), ANSI_BOLD, enabled=color)} paths")
+    print(f"  Root   {paint(str(root), ANSI_BOLD, enabled=color)}")
+    print(f"  Found  {paint(str(len(directories)), ANSI_BOLD, enabled=color)} metadata files")
+    print()
+
+    for path in ignored:
+        print_add_record(
+            "SKIPPED",
+            "—",
+            "unknown",
+            display_run_path(path, root),
+            color=color,
+            detail="not a directory or metadata file",
+        )
+
+    if not directories:
+        print(f"  {paint('○', ANSI_YELLOW, enabled=color)} No ALAMO runs found.")
+        print()
+        return
+
+    client = configured_client()
+    try:
+        owner_id = str(client.request("GET", "/auth/me")["user"]["id"])
+    except (KeyError, TypeError) as error:
+        raise ApiError("Zephyr returned an invalid user record") from error
+
+    added = 0
+    updated = 0
+    skipped = len(ignored)
+    failed = 0
+    for directory in directories:
+        location = display_run_path(directory, root)
+        alamo_hash = ""
+        try:
+            _, values = read_metadata(directory)
+            alamo_hash = values.get("HASH") or values.get("Hash")
+            if not alamo_hash:
+                skipped += 1
+                print_add_record(
+                    "SKIPPED",
+                    "—",
+                    "unknown",
+                    location,
+                    color=color,
+                    detail="metadata has no HASH",
+                )
+                continue
+
+            existing = lookup_owned_run_by_hash(client, alamo_hash, owner_id)
+            status, _ = derived_status(values)
+            run = import_directory(client, directory, status=status)
+            run_id = str(run["id"])
+            sync_once(
+                client,
+                run_id,
+                directory,
+                ThermoTail(directory / "thermo.dat"),
+                status_override=status,
+            )
+            action = "UPDATED" if existing else "ADDED"
+            if existing:
+                updated += 1
+            else:
+                added += 1
+            print_add_record(action, alamo_hash, status, location, color=color)
+        except (ApiError, WorkspaceError, OSError) as error:
+            failed += 1
+            print_add_record(
+                "ERROR",
+                alamo_hash or "—",
+                "failed",
+                location,
+                color=color,
+                detail=str(error),
+            )
+
+    processed = added + updated
+    print()
+    print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+    summary = (
+        f"{processed} processed  ·  "
+        f"{paint(str(added), ANSI_GREEN, ANSI_BOLD, enabled=color)} added  ·  "
+        f"{paint(str(updated), ANSI_CYAN, ANSI_BOLD, enabled=color)} updated"
+    )
+    if skipped:
+        summary += f"  ·  {paint(str(skipped), ANSI_YELLOW, ANSI_BOLD, enabled=color)} skipped"
+    if failed:
+        summary += f"  ·  {paint(str(failed), ANSI_RED, ANSI_BOLD, enabled=color)} failed"
+    print(f"  {paint('Done', ANSI_BOLD, enabled=color)}  {summary}")
+    print()
+    if failed:
+        raise WorkspaceError(f"{failed} run{'s' if failed != 1 else ''} could not be added")
 
 
 def sync_once(
     client: Client,
-    marker: RunMarker,
+    run_id: str,
     directory: Path,
     tail: ThermoTail,
     status_override: str | None = None,
@@ -214,18 +487,18 @@ def sync_once(
     if status_override:
         status = status_override
     digest = metadata_digest(text) if text else ""
-    prior_digest = getattr(sync_once, "metadata_digest", {}).get(marker.run_id)
+    prior_digest = getattr(sync_once, "metadata_digest", {}).get(run_id)
     if text and digest != prior_digest:
-        client.request("PUT", f"/runs/{marker.run_id}/metadata", {"raw_text": text})
+        client.request("PUT", f"/runs/{run_id}/metadata", {"raw_text": text})
         digests = getattr(sync_once, "metadata_digest", {})
-        digests[marker.run_id] = digest
+        digests[run_id] = digest
         sync_once.metadata_digest = digests
     for batch in tail.poll():
-        client.request("POST", f"/runs/{marker.run_id}/thermo", batch)
+        client.request("POST", f"/runs/{run_id}/thermo", batch)
         tail.ack()
     client.request(
         "POST",
-        f"/runs/{marker.run_id}/heartbeat",
+        f"/runs/{run_id}/heartbeat",
         {
             "sequence": time.time_ns(),
             "status": status,
@@ -248,14 +521,14 @@ def process_exists(pid: int) -> bool:
 
 def post_terminal(
     client: Client,
-    marker: RunMarker,
+    run_id: str,
     directory: Path,
     tail: ThermoTail,
     final: str,
 ) -> None:
     for attempt in range(3):
         try:
-            sync_once(client, marker, directory, tail, status_override=final)
+            sync_once(client, run_id, directory, tail, status_override=final)
             return
         except ApiError as error:
             if attempt == 2:
@@ -300,21 +573,14 @@ def cmd_watch(args: argparse.Namespace) -> None:
     requested_server = args.server or os.environ.get("ZEPHYR_SERVER")
     credentials = credentials_for_server(requested_server, login_if_missing=bool(requested_server))
     client = Client(credentials)
-    try:
-        marker = RunMarker.load(directory)
-    except WorkspaceError:
-        initial_status = local_watch_status(directory)
-        if initial_status not in TERMINAL_STATUSES:
-            initial_status = "starting"
-        import_directory(client, directory, args.name, status=initial_status)
-        marker = RunMarker.load(directory)
-    if marker.server.rstrip("/") != credentials.server.rstrip("/"):
-        raise WorkspaceError(
-            f"This run belongs to {marker.server}, but zph is configured for {credentials.server}"
-        )
-    assert marker is not None
+    initial_status = local_watch_status(directory)
+    if initial_status not in TERMINAL_STATUSES:
+        initial_status = "starting"
+    run = import_directory(client, directory, args.name, status=initial_status)
+    run_id = str(run["id"])
+    alamo_hash = str(run["alamo_hash"])
     tail = ThermoTail(directory / args.thermo)
-    print(f"Watching {marker.run_id}; heartbeat every {args.interval:g}s")
+    print(f"Watching HASH {alamo_hash}; heartbeat every {args.interval:g}s")
     last_status = "running"
     heartbeat_interval = max(args.interval, WATCH_LOCAL_POLL_SECONDS)
     next_heartbeat = time.monotonic()
@@ -334,7 +600,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
         now = time.monotonic()
         if now >= next_heartbeat:
             try:
-                last_status = sync_once(client, marker, directory, tail)
+                last_status = sync_once(client, run_id, directory, tail)
             except ApiError as error:
                 print(f"zph: telemetry delayed: {error}", file=sys.stderr)
             if last_status in TERMINAL_STATUSES:
@@ -347,7 +613,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
         )
         stopping.wait(wait_for)
     final = final_watch_status(directory, last_status)
-    post_terminal(client, marker, directory, tail, final)
+    post_terminal(client, run_id, directory, tail, final)
     print(f"Run marked {final}")
 
 
@@ -355,26 +621,27 @@ def cmd_run(args: argparse.Namespace) -> None:
     if not args.command:
         raise WorkspaceError("A command is required after `zph run --`")
     directory = Path(args.directory).resolve()
-    client, _ = client_for_workspace()
+    client = configured_client()
     run = import_directory(
         client,
         directory,
         name=args.name,
         status="running",
         command=args.command,
+        allow_missing_hash=True,
     )
-    marker = RunMarker(run_id=run["id"], server=client.server)
+    run_id = str(run["id"])
     tail = ThermoTail(directory / args.thermo)
     try:
         process = subprocess.Popen(args.command, cwd=directory)
     except OSError:
-        post_terminal(client, marker, directory, tail, "failed")
+        post_terminal(client, run_id, directory, tail, "failed")
         raise
-    print(f"Started {run['id']} (PID {process.pid})")
+    print(f"Started simulation (PID {process.pid})")
     try:
         while process.poll() is None:
             try:
-                sync_once(client, marker, directory, tail, status_override="running")
+                sync_once(client, run_id, directory, tail, status_override="running")
             except ApiError as error:
                 print(f"zph: telemetry delayed: {error}", file=sys.stderr)
             time.sleep(args.interval)
@@ -383,8 +650,12 @@ def cmd_run(args: argparse.Namespace) -> None:
         process.send_signal(signal.SIGINT)
         process.wait()
         final = "interrupted"
-    post_terminal(client, marker, directory, tail, final)
-    print(f"Run marked {final} (exit {process.returncode})")
+    post_terminal(client, run_id, directory, tail, final)
+    try:
+        identity = f"HASH {require_alamo_hash(directory)}"
+    except WorkspaceError:
+        identity = "Run"
+    print(f"{identity} marked {final} (exit {process.returncode})")
     if process.returncode:
         raise SystemExit(process.returncode)
 
@@ -392,7 +663,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 def expanded_paths(patterns: list[str]) -> list[Path]:
     paths: list[Path] = []
     for pattern in patterns:
-        matches = glob.glob(pattern, recursive=True)
+        matches = sorted(glob.glob(pattern, recursive=True))
         if not matches and Path(pattern).exists():
             matches = [pattern]
         paths.extend(Path(match) for match in matches if Path(match).is_file())
@@ -419,38 +690,59 @@ def file_digest(path: Path) -> str:
 
 
 def cmd_put(args: argparse.Namespace) -> None:
-    directory = Path(args.directory).resolve()
-    client, marker = client_for_workspace(directory)
-    assert marker is not None
     paths = expanded_paths(args.paths)
     if not paths:
         raise WorkspaceError("No files matched")
+
+    override = Path(args.directory).resolve() if args.directory else None
+    grouped: dict[Path, list[Path]] = {}
     for path in paths:
-        digest = file_digest(path)
-        size = path.stat().st_size
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        initiated = client.request(
-            "POST",
-            f"/runs/{marker.run_id}/artifacts/initiate",
-            {"sha256": digest, "size": size, "content_type": content_type},
+        directory = override or path.parent
+        grouped.setdefault(directory, []).append(path)
+
+    # Validate every local association before creating or uploading any records.
+    hashes = {directory: require_alamo_hash(directory) for directory in grouped}
+    client = configured_client()
+    color = color_enabled()
+    for directory, run_paths in grouped.items():
+        alamo_hash = hashes[directory]
+        run = lookup_run_by_hash(client, alamo_hash)
+        if run is None:
+            _, values = read_metadata(directory)
+            status, _ = derived_status(values)
+            run = import_directory(client, directory, status=status)
+        run_id = str(run["id"])
+        print(
+            f"{paint('HASH', ANSI_BOLD, ANSI_CYAN, enabled=color)} "
+            f"{paint(alamo_hash, ANSI_BOLD, enabled=color)}  "
+            f"{paint(str(directory), ANSI_DIM, enabled=color)}"
         )
-        if not initiated["already_present"]:
-            client.upload_file(initiated["upload_url"], path, initiated["headers"])
-        try:
-            logical_path = path.relative_to(directory).as_posix()
-        except ValueError:
-            logical_path = path.name
-        record = client.request(
-            "POST",
-            f"/runs/{marker.run_id}/artifacts/complete",
-            {
-                "sha256": digest,
-                "path": logical_path,
-                "logical_name": path.name,
-                "kind": artifact_kind(path),
-            },
-        )
-        print(f"{record['sha256'][:12]}  {record['path']}  v{record['version']}")
+        for path in run_paths:
+            digest = file_digest(path)
+            size = path.stat().st_size
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            initiated = client.request(
+                "POST",
+                f"/runs/{run_id}/artifacts/initiate",
+                {"sha256": digest, "size": size, "content_type": content_type},
+            )
+            if not initiated["already_present"]:
+                client.upload_file(initiated["upload_url"], path, initiated["headers"])
+            try:
+                logical_path = path.relative_to(directory).as_posix()
+            except ValueError:
+                logical_path = path.name
+            record = client.request(
+                "POST",
+                f"/runs/{run_id}/artifacts/complete",
+                {
+                    "sha256": digest,
+                    "path": logical_path,
+                    "logical_name": path.name,
+                    "kind": artifact_kind(path),
+                },
+            )
+            print(f"  {record['sha256'][:12]}  {record['path']}  v{record['version']}")
 
 
 def safe_destination(root: Path, relative: str) -> Path:
@@ -468,9 +760,11 @@ def write_output(path: Path, content: bytes, overwrite: bool) -> None:
 
 
 def cmd_get(args: argparse.Namespace) -> None:
-    client, _ = client_for_workspace()
-    run_data = client.request("GET", f"/runs/{args.run_id}")
-    root = Path(args.output or args.run_id).resolve()
+    client = configured_client()
+    run = find_run_by_hash(client, args.alamo_hash)
+    run_id = str(run["id"])
+    run_data = client.request("GET", f"/runs/{run_id}")
+    root = Path(args.output or args.alamo_hash).resolve()
     root.mkdir(parents=True, exist_ok=True)
     metadata = run_data.get("metadata")
     if metadata:
@@ -497,20 +791,20 @@ def cmd_get(args: argparse.Namespace) -> None:
             ("\n".join(thermo_lines) + "\n").encode(),
             args.overwrite,
         )
-    records = client.request("GET", f"/runs/{args.run_id}/artifacts")
+    records = client.request("GET", f"/runs/{run_id}/artifacts")
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
         latest.setdefault(record["path"], record)
     for relative, record in latest.items():
+        # Never restore identity files created by pre-0.2.2 clients.
         if relative in {"metadata", "thermo.dat", ".zephyr.json", "zephyr-run.json"}:
             continue
         downloadable = client.request(
-            "GET", f"/runs/{args.run_id}/artifacts/{record['id']}/download"
+            "GET", f"/runs/{run_id}/artifacts/{record['id']}/download"
         )
         target = safe_destination(root, relative)
         write_output(target, Client.download(downloadable["download_url"]), args.overwrite)
         print(f"downloaded {relative}")
-    RunMarker(run_id=args.run_id, server=client.server).save(root)
     print(f"Restored run into {root}")
 
 
@@ -519,7 +813,7 @@ def format_time(value: str | None) -> str:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    client, _ = client_for_workspace()
+    client = configured_client()
     query: list[tuple[str, str]] = []
     if args.status:
         query.append(("status", args.status))
@@ -529,20 +823,21 @@ def cmd_list(args: argparse.Namespace) -> None:
     if args.json:
         print(json.dumps(runs, indent=2))
         return
-    print(f"{'ID':8}  {'STATUS':12}  {'UPDATED':19}  NAME")
+    print(f"{'HASH':20}  {'STATUS':12}  {'UPDATED':19}  NAME")
     for run in runs:
         print(
-            f"{run['id'][:8]}  {run['effective_status'][:12]:12}  "
+            f"{(run['alamo_hash'] or '-'):20}  {run['effective_status'][:12]:12}  "
             f"{format_time(run['updated_at']):19}  {run['name']}"
         )
 
 
 def cmd_compare(args: argparse.Namespace) -> None:
-    if len(args.run_ids) < 2:
-        raise WorkspaceError("Comparison requires at least two run IDs")
-    client, _ = client_for_workspace()
+    if len(args.alamo_hashes) < 2:
+        raise WorkspaceError("Comparison requires at least two HASH values")
+    client = configured_client()
+    run_ids = [str(find_run_by_hash(client, value)["id"]) for value in args.alamo_hashes]
     data = client.request(
-        "GET", "/comparisons/runs", query=[("ids", run_id) for run_id in args.run_ids]
+        "GET", "/comparisons/runs", query=[("ids", run_id) for run_id in run_ids]
     )
     if args.json:
         print(json.dumps(data, indent=2))
@@ -576,6 +871,21 @@ def parser() -> argparse.ArgumentParser:
     )
     import_command.set_defaults(handler=cmd_import)
 
+    add = commands.add_parser(
+        "add",
+        help="recursively register ALAMO runs beneath a path",
+        description=(
+            "Discover ALAMO metadata files recursively and add or update their Zephyr records."
+        ),
+    )
+    add.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="directories, metadata files, or wildcard patterns (default: current directory)",
+    )
+    add.set_defaults(handler=cmd_add)
+
     watch = commands.add_parser("watch", help="post heartbeats, metadata, and thermo data")
     watch.add_argument("directory", nargs="?", default=".")
     watch.add_argument("--name")
@@ -593,13 +903,19 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("command", nargs=argparse.REMAINDER)
     run.set_defaults(handler=cmd_run)
 
-    put = commands.add_parser("put", help="upload artifacts for the current run")
+    put = commands.add_parser(
+        "put",
+        help="upload artifacts using the metadata beside each file",
+    )
     put.add_argument("paths", nargs="+")
-    put.add_argument("--directory", default=".")
+    put.add_argument(
+        "--directory",
+        help="use this run directory for every file instead of each file's directory",
+    )
     put.set_defaults(handler=cmd_put)
 
     get = commands.add_parser("get", help="restore a run and its latest artifacts")
-    get.add_argument("run_id")
+    get.add_argument("alamo_hash", metavar="HASH")
     get.add_argument("--output", "-o")
     get.add_argument("--overwrite", action="store_true")
     get.set_defaults(handler=cmd_get)
@@ -611,7 +927,7 @@ def parser() -> argparse.ArgumentParser:
     listing.set_defaults(handler=cmd_list)
 
     compare = commands.add_parser("compare", help="compare metadata across runs")
-    compare.add_argument("run_ids", nargs="+")
+    compare.add_argument("alamo_hashes", metavar="HASH", nargs="+")
     compare.add_argument("--all", action="store_true", help="include identical metadata")
     compare.add_argument("--json", action="store_true")
     compare.set_defaults(handler=cmd_compare)

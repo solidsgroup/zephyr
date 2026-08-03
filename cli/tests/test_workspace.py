@@ -1,17 +1,19 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from zephyr_cli.main import safe_destination
-from zephyr_cli.workspace import RunMarker
+from zephyr_cli.main import require_alamo_hash, safe_destination
 
 
-def test_marker_round_trip(tmp_path: Path) -> None:
-    marker = RunMarker(run_id="run-id", server="https://zephyr.example")
-    marker.save(tmp_path)
-    assert RunMarker.load(tmp_path) == marker
-    assert json.loads((tmp_path / ".zephyr.json").read_text())["protocol"] == "1.0"
+def test_alamo_hash_comes_from_metadata(tmp_path: Path) -> None:
+    (tmp_path / "metadata").write_text("Status = Running\nHASH = run-hash\n")
+
+    assert require_alamo_hash(tmp_path) == "run-hash"
+
+
+def test_alamo_hash_is_required(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="No HASH"):
+        require_alamo_hash(tmp_path)
 
 
 def test_safe_destination_rejects_parent(tmp_path: Path) -> None:

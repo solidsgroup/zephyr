@@ -21,8 +21,10 @@ Drive file IDs are implementation details and are never used as run identity.
 
 ## Run identity and state
 
-Every run has a server UUID. ALAMO's `HASH`, when available, is a searchable
-alias and an idempotency key per owner; it is not the canonical identifier.
+Every run has a server UUID for database relationships and internal API routes.
+That UUID is an implementation detail: locally and in the CLI, ALAMO's `HASH`
+is the run identifier and idempotency key. It is read from `metadata`; Zephyr
+does not write a separate identity marker into the simulation directory.
 Heartbeat sequence numbers are monotonic, so retries and out-of-order messages
 cannot move a run backwards. A `starting` or `running` run whose heartbeat is
 more than two minutes old is displayed as `unreachable` without destroying its

@@ -13,7 +13,19 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function ArtifactCard({ runId, artifact }: { runId: string; artifact: Artifact }) {
+function ArtifactCard({
+  runId,
+  artifact,
+  isThumbnail,
+  selectingThumbnail,
+  onSelectThumbnail,
+}: {
+  runId: string;
+  artifact: Artifact;
+  isThumbnail: boolean;
+  selectingThumbnail: boolean;
+  onSelectThumbnail: () => void;
+}) {
   const download = useQuery({
     queryKey: ["artifact-download", artifact.id],
     queryFn: () => api<Artifact>(`/runs/${runId}/artifacts/${artifact.id}/download`),
@@ -25,9 +37,9 @@ function ArtifactCard({ runId, artifact }: { runId: string; artifact: Artifact }
     window.location.assign(record.download_url!);
   };
   return (
-    <article className="artifact-card">
+    <article className="artifact-card" data-thumbnail={isThumbnail}>
       <div className="artifact-preview">{artifact.kind === "image" && download.data?.download_url ? <img src={download.data.download_url} alt={artifact.logical_name} /> : <span>{artifact.kind === "table" ? "▦" : artifact.kind === "log" ? "≡" : "◇"}</span>}</div>
-      <div className="artifact-info"><strong title={artifact.path}>{artifact.logical_name}</strong><small>{artifact.path} · {formatBytes(artifact.size)} · v{artifact.version}</small></div>
+      <div className="artifact-info"><strong title={artifact.path}>{artifact.logical_name}</strong><small>{artifact.path} · {formatBytes(artifact.size)} · v{artifact.version}</small>{artifact.kind === "image" && <button className={`thumbnail-choice${isThumbnail ? " active" : ""}`} disabled={isThumbnail || selectingThumbnail} onClick={onSelectThumbnail}>{isThumbnail ? "★ Thumbnail" : selectingThumbnail ? "Setting…" : "☆ Use as thumbnail"}</button>}</div>
       <button className="icon-button" title="Download" onClick={requestDownload}>⇩</button>
     </article>
   );
@@ -64,6 +76,7 @@ function EditRun({ run }: { run: Run }) {
 
 export default function RunPage() {
   const { runId = "" } = useParams();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState("overview");
   const detail = useQuery({ queryKey: ["run", runId], queryFn: () => api<RunDetail>(`/runs/${runId}`), refetchInterval: 15_000 });
   const artifacts = useQuery({ queryKey: ["artifacts", runId], queryFn: () => api<Artifact[]>(`/runs/${runId}/artifacts`) });
@@ -71,6 +84,13 @@ export default function RunPage() {
     const paths = new Set<string>();
     return (artifacts.data ?? []).filter((artifact) => !paths.has(artifact.path) && Boolean(paths.add(artifact.path)));
   }, [artifacts.data]);
+  const selectThumbnail = useMutation({
+    mutationFn: (artifactId: string) => api<Run>(`/runs/${runId}/artifacts/${artifactId}/thumbnail`, { method: "PUT" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
   if (detail.isPending) return <div className="center-state"><span className="spinner" />Loading run…</div>;
   if (detail.isError) return <div className="error-panel">This run could not be loaded.</div>;
   const { run, metadata, thermo } = detail.data;
@@ -95,7 +115,7 @@ export default function RunPage() {
         <EditRun run={run} />
       </div>}
       {tab === "thermo" && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">RESULTS EXPLORER</p><h2>thermo.dat</h2></div><span>{thermo.reduce((count, series) => count + series.rows.length, 0).toLocaleString()} rows</span></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>}
-      {tab === "files" && <section><div className="section-heading"><div><h2>Artifacts</h2><p>Latest version of each posted file.</p></div></div>{latestArtifacts.length ? <div className="artifact-grid">{latestArtifacts.map((artifact) => <ArtifactCard key={artifact.id} runId={run.id} artifact={artifact} />)}</div> : <div className="empty-panel panel">No artifacts yet. Upload some with <code>zph put '*.png'</code>.</div>}</section>}
+      {tab === "files" && <section><div className="section-heading"><div><h2>Artifacts</h2><p>Latest version of each posted file. Choose an image to represent this run.</p></div></div>{selectThumbnail.isError && <p className="form-error">Could not set the run thumbnail.</p>}{latestArtifacts.length ? <div className="artifact-grid">{latestArtifacts.map((artifact) => <ArtifactCard key={artifact.id} runId={run.id} artifact={artifact} isThumbnail={artifact.id === run.thumbnail_artifact_id} selectingThumbnail={selectThumbnail.isPending && selectThumbnail.variables === artifact.id} onSelectThumbnail={() => selectThumbnail.mutate(artifact.id)} />)}</div> : <div className="empty-panel panel">No artifacts yet. Upload some with <code>zph put '*.png'</code>.</div>}</section>}
       {tab === "metadata" && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">ALAMO OUTPUT</p><h2>metadata</h2></div><code>{metadata?.digest.slice(0, 12) ?? "not posted"}</code></div>{metadata ? <><MetadataTable records={[{ name: run.name, values: metadata.values }]} /><details className="raw-metadata"><summary>Raw file</summary><pre>{metadata.raw_text}</pre></details></> : <div className="empty-panel">No metadata file has been posted.</div>}</section>}
     </>
   );

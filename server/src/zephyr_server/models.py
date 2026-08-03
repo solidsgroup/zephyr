@@ -127,6 +127,14 @@ class Run(TimestampMixin, Base):
     command: Mapped[list[str]] = mapped_column(JSON, default=list)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     notes: Mapped[str] = mapped_column(Text, default="")
+    thumbnail_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "run_artifacts.id",
+            name="fk_runs_thumbnail_artifact",
+            ondelete="SET NULL",
+            use_alter=True,
+        )
+    )
 
     metadata_record: Mapped[RunMetadata | None] = relationship(
         back_populates="run", cascade="all, delete", uselist=False
@@ -134,7 +142,15 @@ class Run(TimestampMixin, Base):
     thermo_series: Mapped[list[ThermoSeries]] = relationship(
         back_populates="run", cascade="all, delete"
     )
-    artifacts: Mapped[list[RunArtifact]] = relationship(back_populates="run", cascade="all, delete")
+    artifacts: Mapped[list[RunArtifact]] = relationship(
+        back_populates="run",
+        cascade="all, delete",
+        foreign_keys="RunArtifact.run_id",
+    )
+    thumbnail_artifact: Mapped[RunArtifact | None] = relationship(
+        foreign_keys=[thumbnail_artifact_id],
+        post_update=True,
+    )
 
 
 class RunProject(Base):
@@ -215,7 +231,7 @@ class RunArtifact(TimestampMixin, Base):
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     derivation: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    run: Mapped[Run] = relationship(back_populates="artifacts")
+    run: Mapped[Run] = relationship(back_populates="artifacts", foreign_keys=[run_id])
     object: Mapped[ArtifactObject] = relationship()
 
 

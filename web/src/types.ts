@@ -23,8 +23,20 @@ export interface Run {
   command: string[];
   tags: string[];
   notes: string;
+  thumbnail_artifact_id: string | null;
+  artifact_count: number;
+  artifact_previews: ArtifactPreview[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ArtifactPreview {
+  id: string;
+  logical_name: string;
+  path: string;
+  kind: string;
+  content_type: string;
+  download_url: string | null;
 }
 
 export interface MetadataRecord {
