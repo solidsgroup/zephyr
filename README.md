@@ -33,7 +33,7 @@ HTTP/JSON contract under `/api/v1`.
 Create a token in **Settings → CLI tokens**, then connect once:
 
 ```console
-pipx install zph
+pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
 zph login https://zephyr.solids.group
 ```
 

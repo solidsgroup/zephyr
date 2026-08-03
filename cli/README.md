@@ -4,7 +4,7 @@
 dependencies outside Python's standard library.
 
 ```console
-pipx install zph
+pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
 zph login https://zephyr.solids.group
 zph import .
 zph watch . --pid 12345
