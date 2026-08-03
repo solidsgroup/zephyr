@@ -65,7 +65,8 @@ the heartbeat. Shell-expanded
 wildcards (`zph add output*`) and quoted patterns (`zph add 'output*'`) both
 work. Its summary distinguishes newly added records from existing records that
 were updated. Color is enabled for interactive terminals and disabled when
-output is piped or `NO_COLOR` is set.
+output is piped or `NO_COLOR` is set. Numbered BoxLib data trees ending in
+`cell` or `node` are pruned from recursive discovery before they are entered.
 
 Upload and restore results:
 

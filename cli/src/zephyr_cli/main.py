@@ -28,6 +28,7 @@ from .workspace import WorkspaceError
 TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 WATCH_LOCAL_POLL_SECONDS = 0.25
 MAX_CAPTURED_TEXT_BYTES = 1_000_000
+BOX_LIB_DATA_TREE = re.compile(r"^\d+(?:cell|node)$", re.IGNORECASE)
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -325,13 +326,23 @@ def discover_run_directories(path: Path) -> tuple[Path, list[Path]]:
         return target.parent, [target.parent]
     if not target.is_dir():
         raise WorkspaceError(f"{target} is not a directory")
+    if BOX_LIB_DATA_TREE.fullmatch(target.name):
+        return target, []
 
     try:
-        directories = {
-            metadata.parent.resolve()
-            for metadata in target.rglob("metadata")
-            if metadata.is_file()
-        }
+        directories = set()
+
+        def raise_walk_error(error: OSError) -> None:
+            raise error
+
+        for root, child_directories, filenames in os.walk(target, onerror=raise_walk_error):
+            child_directories[:] = [
+                name for name in child_directories if not BOX_LIB_DATA_TREE.fullmatch(name)
+            ]
+            if "metadata" in filenames:
+                metadata = Path(root) / "metadata"
+                if metadata.is_file():
+                    directories.add(metadata.parent.resolve())
     except OSError as error:
         raise WorkspaceError(f"Cannot scan {target}: {error}") from error
     return target, sorted(directories, key=lambda directory: str(directory))

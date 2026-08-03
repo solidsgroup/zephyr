@@ -40,6 +40,35 @@ def test_discover_run_directories_recurses(tmp_path: Path) -> None:
     )
 
 
+def test_discover_run_directories_prunes_boxlib_cell_and_node_trees(tmp_path: Path) -> None:
+    visible = tmp_path / "campaign" / "run-2" / "metadata"
+    cell_metadata = tmp_path / "00000cell" / "Level_0" / "metadata"
+    node_metadata = tmp_path / "123456node" / "Level_4" / "metadata"
+    similar_name = tmp_path / "00000cell-results" / "metadata"
+    for metadata in (visible, cell_metadata, node_metadata, similar_name):
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text("HASH = test\n", encoding="utf-8")
+
+    _, directories = main.discover_run_directories(tmp_path)
+
+    assert directories == sorted(
+        [visible.parent.resolve(), similar_name.parent.resolve()],
+        key=str,
+    )
+
+
+def test_discover_run_directories_does_not_scan_explicit_boxlib_tree(tmp_path: Path) -> None:
+    data_tree = tmp_path / "00400cell"
+    metadata = data_tree / "Level_0" / "metadata"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("HASH = hidden\n", encoding="utf-8")
+
+    root, directories = main.discover_run_directories(data_tree)
+
+    assert root == data_tree.resolve()
+    assert directories == []
+
+
 def test_expand_add_paths_supports_wildcards_and_deduplicates(tmp_path: Path) -> None:
     first = tmp_path / "output-a"
     second = tmp_path / "output-b"
