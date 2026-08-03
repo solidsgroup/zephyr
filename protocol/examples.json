@@ -1,0 +1,23 @@
+{
+  "run_create": {
+    "name": "rm-3d-resolution-256",
+    "status": "running",
+    "alamo_hash": "5309393027703618336",
+    "host": "cluster-node-17",
+    "git_commit": "1927b19c6",
+    "command": ["alamo", "inputs"]
+  },
+  "heartbeat": {
+    "sequence": 1722700800000000000,
+    "status": "running",
+    "progress": 42,
+    "observed_at": "2026-08-03T12:00:00Z"
+  },
+  "thermo_batch": {
+    "segment": 0,
+    "columns": ["time", "temperature"],
+    "rows": [
+      {"sequence": 0, "values": {"time": 0.0, "temperature": 300.0}}
+    ]
+  }
+}

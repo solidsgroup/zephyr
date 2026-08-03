@@ -1,0 +1,16 @@
+{
+  "protocol": "1.0",
+  "minimum_client": "0.1.0",
+  "maximum_client": "0.x",
+  "capabilities": [
+    "runs",
+    "metadata",
+    "thermo-segments",
+    "artifacts-s3",
+    "projects",
+    "project-sharing",
+    "public-projects",
+    "comparisons",
+    "saved-views"
+  ]
+}

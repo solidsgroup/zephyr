@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: zephyr
+      POSTGRES_USER: zephyr
+      POSTGRES_PASSWORD: zephyr
+    ports:
+      - "5432:5432"
+    volumes:
+      - zephyr-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zephyr"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: zephyr
+      MINIO_ROOT_PASSWORD: zephyr-local-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - zephyr-minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        until mc alias set local http://minio:9000 zephyr zephyr-local-secret; do sleep 1; done;
+        mc mb --ignore-existing local/zephyr
+
+volumes:
+  zephyr-postgres:
+  zephyr-minio:

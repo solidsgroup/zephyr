@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: zephyr
+    runtime: docker
+    plan: starter
+    region: ohio
+    repo: https://github.com/solidsgroup/zephyr
+    branch: master
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    preDeployCommand: alembic -c /app/alembic.ini upgrade head
+    domains:
+      - zephyr.solids.group
+    envVars:
+      - key: ZEPHYR_ENV
+        value: production
+      - key: ZEPHYR_DATABASE_URL
+        fromDatabase:
+          name: zephyr-db
+          property: connectionString
+      - key: ZEPHYR_PUBLIC_URL
+        value: https://zephyr.solids.group
+      - key: ZEPHYR_GOOGLE_ALLOWED_DOMAIN
+        value: solids.group
+      - key: ZEPHYR_SESSION_SECRET
+        generateValue: true
+      - key: ZEPHYR_TOKEN_PEPPER
+        generateValue: true
+      - key: ZEPHYR_GOOGLE_CLIENT_ID
+        sync: false
+      - key: ZEPHYR_GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ZEPHYR_S3_ENDPOINT_URL
+        sync: false
+      - key: ZEPHYR_S3_PUBLIC_ENDPOINT_URL
+        sync: false
+      - key: ZEPHYR_S3_REGION
+        value: auto
+      - key: ZEPHYR_S3_BUCKET
+        sync: false
+      - key: ZEPHYR_S3_ACCESS_KEY_ID
+        sync: false
+      - key: ZEPHYR_S3_SECRET_ACCESS_KEY
+        sync: false
+
+databases:
+  - name: zephyr-db
+    databaseName: zephyr
+    user: zephyr
+    plan: basic-1gb
+    region: ohio
+    postgresMajorVersion: "16"
+    storageAutoscalingEnabled: true
