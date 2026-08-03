@@ -1,5 +1,7 @@
 import argparse
 import io
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +27,9 @@ def test_color_respects_terminal_and_no_color(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_discover_run_directories_recurses(tmp_path: Path) -> None:
-    root_run = tmp_path / "metadata"
+    root_run = tmp_path / "run-1" / "metadata"
     nested_run = tmp_path / "campaign" / "run-2" / "metadata"
+    root_run.parent.mkdir()
     root_run.write_text("HASH = root\n", encoding="utf-8")
     nested_run.parent.mkdir(parents=True)
     nested_run.write_text("HASH = nested\n", encoding="utf-8")
@@ -35,9 +38,38 @@ def test_discover_run_directories_recurses(tmp_path: Path) -> None:
 
     assert root == tmp_path.resolve()
     assert directories == sorted(
-        [tmp_path.resolve(), nested_run.parent.resolve()],
+        [root_run.parent.resolve(), nested_run.parent.resolve()],
         key=str,
     )
+
+
+def test_discover_run_directories_stops_below_run_metadata(tmp_path: Path) -> None:
+    run = tmp_path / "output"
+    nested = run / "restart-copy" / "metadata"
+    nested.parent.mkdir(parents=True)
+    (run / "metadata").write_text("HASH = root\n", encoding="utf-8")
+    nested.write_text("HASH = nested\n", encoding="utf-8")
+
+    _, directories = main.discover_run_directories(tmp_path)
+
+    assert directories == [run.resolve()]
+
+
+def test_discover_run_directories_prunes_alamo_source_and_environment_trees(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "configure").write_text("", encoding="utf-8")
+    hidden = tmp_path / "ext" / "dependency" / "metadata"
+    environment = tmp_path / ".venv" / "package" / "metadata"
+    visible = tmp_path / "tests" / "case" / "output" / "metadata"
+    for metadata in (hidden, environment, visible):
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text("HASH = test\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+
+    _, directories = main.discover_run_directories(tmp_path)
+
+    assert directories == [visible.parent.resolve()]
 
 
 def test_discover_run_directories_prunes_boxlib_cell_and_node_trees(tmp_path: Path) -> None:
@@ -126,10 +158,10 @@ def test_add_reports_added_updated_and_skipped_runs(
             if (method, path) == ("GET", "/auth/me"):
                 return {"user": {"id": "owner-1"}}
             if (method, path) == ("GET", "/runs"):
-                search = dict(query or []).get("search")
-                if search == "hash-old":
-                    return [{"id": "old-id", "alamo_hash": "hash-old", "owner_id": "owner-1"}]
-                return []
+                assert dict(query or []) == {"limit": "1000"}
+                return [
+                    {"id": "old-id", "alamo_hash": "hash-old", "owner_id": "owner-1"}
+                ]
             if (method, path) == ("POST", "/runs"):
                 assert isinstance(payload, dict)
                 alamo_hash = str(payload["alamo_hash"])
@@ -177,6 +209,63 @@ def test_add_reports_added_updated_and_skipped_runs(
         "git_diff": "diff --git a/a.cpp b/a.cpp\n",
         "git_diff_truncated": False,
     }
+    assert sum(method == "GET" and path == "/runs" for method, path, _, _ in requests) == 1
+    assert sum(
+        method == "PUT" and path == "/runs/new-id/metadata"
+        for method, path, _, _ in requests
+    ) == 1
+
+
+def test_add_syncs_multiple_runs_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for index in range(4):
+        directory = tmp_path / f"run-{index}"
+        directory.mkdir()
+        (directory / "metadata").write_text(
+            f"HASH = hash-{index}\nStatus = Complete\n",
+            encoding="utf-8",
+        )
+    lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    class SlowClient:
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: object | None = None,
+            query: object | None = None,
+        ) -> Any:
+            nonlocal active, maximum_active
+            if (method, path) == ("GET", "/auth/me"):
+                return {"user": {"id": "owner-1"}}
+            if (method, path) == ("GET", "/runs"):
+                return []
+            if (method, path) == ("POST", "/runs"):
+                assert isinstance(payload, dict)
+                with lock:
+                    active += 1
+                    maximum_active = max(maximum_active, active)
+                time.sleep(0.03)
+                with lock:
+                    active -= 1
+                return {
+                    "id": f"id-{payload['alamo_hash']}",
+                    "alamo_hash": payload["alamo_hash"],
+                    "name": payload["name"],
+                }
+            return {}
+
+    monkeypatch.setattr(main, "configured_client", SlowClient)
+
+    main.cmd_add(argparse.Namespace(paths=[str(tmp_path)]))
+
+    assert maximum_active >= 2
+    assert "4 concurrent connections" in capsys.readouterr().out
 
 
 def test_git_repository_url_normalizes_github_ssh_remote(tmp_path: Path) -> None:

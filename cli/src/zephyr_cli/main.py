@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -29,6 +30,33 @@ TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 WATCH_LOCAL_POLL_SECONDS = 0.25
 MAX_CAPTURED_TEXT_BYTES = 1_000_000
 BOX_LIB_DATA_TREE = re.compile(r"^\d+(?:cell|node)$", re.IGNORECASE)
+ALWAYS_PRUNED_DIRECTORIES = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+ALAMO_SOURCE_DIRECTORIES = {
+    ".make",
+    ".simba",
+    "bin",
+    "build",
+    "docs",
+    "ext",
+    "lib",
+    "scripts",
+    "src",
+    "zephyr",
+}
+SYNCED_METADATA_DIGESTS: dict[str, str] = {}
+SYNCED_OUTPUT_DIGESTS: dict[tuple[str, str], str] = {}
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -262,6 +290,7 @@ def import_directory(
     run = client.request("POST", "/runs", payload)
     if text:
         client.request("PUT", f"/runs/{run['id']}/metadata", {"raw_text": text})
+        SYNCED_METADATA_DIGESTS[str(run["id"])] = metadata_digest(text)
     return run
 
 
@@ -337,12 +366,21 @@ def discover_run_directories(path: Path) -> tuple[Path, list[Path]]:
 
         for root, child_directories, filenames in os.walk(target, onerror=raise_walk_error):
             child_directories[:] = [
-                name for name in child_directories if not BOX_LIB_DATA_TREE.fullmatch(name)
+                name
+                for name in child_directories
+                if name not in ALWAYS_PRUNED_DIRECTORIES
+                and not BOX_LIB_DATA_TREE.fullmatch(name)
             ]
             if "metadata" in filenames:
                 metadata = Path(root) / "metadata"
                 if metadata.is_file():
                     directories.add(metadata.parent.resolve())
+                    child_directories[:] = []
+                    continue
+            if "configure" in filenames and "src" in child_directories:
+                child_directories[:] = [
+                    name for name in child_directories if name not in ALAMO_SOURCE_DIRECTORIES
+                ]
     except OSError as error:
         raise WorkspaceError(f"Cannot scan {target}: {error}") from error
     return target, sorted(directories, key=lambda directory: str(directory))
@@ -443,14 +481,21 @@ def cmd_add(args: argparse.Namespace) -> None:
         owner_id = str(client.request("GET", "/auth/me")["user"]["id"])
     except (KeyError, TypeError) as error:
         raise ApiError("Zephyr returned an invalid user record") from error
+    catalog = client.request("GET", "/runs", query=[("limit", "1000")])
+    existing_by_hash = {
+        str(run["alamo_hash"]): run
+        for run in catalog
+        if run.get("alamo_hash") and str(run.get("owner_id")) == owner_id
+    }
 
     added = 0
     updated = 0
     skipped = len(ignored)
     failed = 0
+    candidates: list[tuple[Path, str, str, str, bool]] = []
+    seen_hashes: dict[str, str] = {}
     for directory in directories:
         location = display_run_path(directory, root)
-        alamo_hash = ""
         try:
             _, values = read_metadata(directory)
             alamo_hash = values.get("HASH") or values.get("Hash")
@@ -465,34 +510,78 @@ def cmd_add(args: argparse.Namespace) -> None:
                     detail="metadata has no HASH",
                 )
                 continue
-
-            existing = lookup_owned_run_by_hash(client, alamo_hash, owner_id)
+            first_location = seen_hashes.get(alamo_hash)
+            if first_location:
+                skipped += 1
+                print_add_record(
+                    "SKIPPED",
+                    alamo_hash,
+                    "duplicate",
+                    location,
+                    color=color,
+                    detail=f"same HASH as {first_location}",
+                )
+                continue
+            seen_hashes[alamo_hash] = location
             status, _ = derived_status(values)
-            run = import_directory(client, directory, status=status)
-            run_id = str(run["id"])
-            sync_once(
-                client,
-                run_id,
-                directory,
-                ThermoTail(directory / "thermo.dat"),
-                status_override=status,
+            candidates.append(
+                (directory, location, alamo_hash, status, alamo_hash in existing_by_hash)
             )
-            action = "UPDATED" if existing else "ADDED"
-            if existing:
-                updated += 1
-            else:
-                added += 1
-            print_add_record(action, alamo_hash, status, location, color=color)
         except (ApiError, WorkspaceError, OSError) as error:
             failed += 1
             print_add_record(
                 "ERROR",
-                alamo_hash or "—",
+                "—",
                 "failed",
                 location,
                 color=color,
                 detail=str(error),
             )
+
+    def sync_candidate(candidate: tuple[Path, str, str, str, bool]) -> dict[str, Any]:
+        directory, _, _, status, _ = candidate
+        run = import_directory(client, directory, status=status)
+        sync_once(
+            client,
+            str(run["id"]),
+            directory,
+            ThermoTail(directory / "thermo.dat"),
+            status_override=status,
+        )
+        return run
+
+    worker_count = min(4, len(candidates))
+    if worker_count:
+        print(
+            f"  Sync   {paint(str(len(candidates)), ANSI_BOLD, enabled=color)} runs  ·  "
+            f"{worker_count} concurrent connections",
+            flush=True,
+        )
+        print()
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(sync_candidate, candidate): candidate for candidate in candidates
+            }
+            for future in as_completed(futures):
+                _, location, alamo_hash, status, existing = futures[future]
+                try:
+                    future.result()
+                    action = "UPDATED" if existing else "ADDED"
+                    if existing:
+                        updated += 1
+                    else:
+                        added += 1
+                    print_add_record(action, alamo_hash, status, location, color=color)
+                except (ApiError, WorkspaceError, OSError) as error:
+                    failed += 1
+                    print_add_record(
+                        "ERROR",
+                        alamo_hash,
+                        "failed",
+                        location,
+                        color=color,
+                        detail=str(error),
+                    )
 
     processed = added + updated
     print()
@@ -524,12 +613,10 @@ def sync_once(
     if status_override:
         status = status_override
     digest = metadata_digest(text) if text else ""
-    prior_digest = getattr(sync_once, "metadata_digest", {}).get(run_id)
+    prior_digest = SYNCED_METADATA_DIGESTS.get(run_id)
     if text and digest != prior_digest:
         client.request("PUT", f"/runs/{run_id}/metadata", {"raw_text": text})
-        digests = getattr(sync_once, "metadata_digest", {})
-        digests[run_id] = digest
-        sync_once.metadata_digest = digests
+        SYNCED_METADATA_DIGESTS[run_id] = digest
     sync_run_output(client, run_id, directory)
     for batch in tail.poll():
         client.request("POST", f"/runs/{run_id}/thermo", batch)
@@ -568,7 +655,6 @@ def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
         "stdout": (stdout_path, True),
         "git_diff": (directory / "diff.patch", False),
     }
-    digests = getattr(sync_run_output, "digests", {})
     updates: dict[str, object] = {}
     pending: dict[tuple[str, str], str] = {}
     for field, (path, keep_tail) in sources.items():
@@ -577,7 +663,7 @@ def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
         text, truncated = captured_text(path, keep_tail=keep_tail)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         key = (run_id, field)
-        if digests.get(key) == digest:
+        if SYNCED_OUTPUT_DIGESTS.get(key) == digest:
             continue
         updates[field] = text
         updates[f"{field}_truncated"] = truncated
@@ -585,8 +671,7 @@ def sync_run_output(client: Client, run_id: str, directory: Path) -> None:
     if not updates:
         return
     client.request("PUT", f"/runs/{run_id}/output", updates)
-    digests.update(pending)
-    sync_run_output.digests = digests
+    SYNCED_OUTPUT_DIGESTS.update(pending)
 
 
 def process_exists(pid: int) -> bool:

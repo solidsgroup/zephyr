@@ -44,7 +44,12 @@ labeled as `ADDED`, `UPDATED`, `SKIPPED`, or `ERROR`; `thermo.dat` is imported
 when present, along with ALAMO's `out.log` and `diff.patch`. Watchers refresh
 the captured terminal output as the simulation runs. Interactive output uses
 color; set `NO_COLOR=1` for plain output. Recursive scans prune numbered BoxLib
-data trees such as `00000cell` and `00000node` without entering them.
+data trees such as `00000cell` and `00000node` without entering them. A
+directory containing `metadata` is treated as a complete run root, so its
+potentially large descendants are not scanned. ALAMO source/vendor trees,
+virtual environments, VCS data, and package caches are also excluded. Bulk
+registration resolves the server catalog once and synchronizes up to four runs
+concurrently.
 
 `zph put` looks for `metadata` beside each target file. Thus
 `zph put output/myfile.png` automatically selects the run described by
