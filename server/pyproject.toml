@@ -22,6 +22,9 @@ dependencies = [
   "uvicorn[standard]>=0.34,<1",
 ]
 
+[project.scripts]
+zephyr-migrate = "zephyr_server.migrate:main"
+
 [project.optional-dependencies]
 dev = [
   "aiosqlite>=0.20,<1",

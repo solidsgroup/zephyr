@@ -4,6 +4,10 @@
 Render's Ohio region. Render deploys every push to `master`, runs Alembic before
 traffic moves to the new image, and checks `/healthz`.
 
+The pre-deploy phase invokes the zero-argument `zephyr-migrate` package entry
+point. Keep this as a single command token: it calls Alembic programmatically so
+Docker command parsing cannot drop the migration revision arguments.
+
 The initial deployment is intentionally sized as one always-on Starter web
 service plus a Basic-256mb PostgreSQL instance with a 1 GB disk. Database
 storage autoscaling is disabled so that the monthly cost cannot grow without an

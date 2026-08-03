@@ -9,7 +9,7 @@ services:
     autoDeployTrigger: commit
     dockerfilePath: ./Dockerfile
     healthCheckPath: /healthz
-    preDeployCommand: alembic -c /app/alembic.ini upgrade head
+    preDeployCommand: zephyr-migrate
     domains:
       - zephyr.solids.group
     envVars:
