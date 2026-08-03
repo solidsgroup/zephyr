@@ -1,7 +1,13 @@
+import argparse
 from pathlib import Path
 
+import pytest
+
+from zephyr_cli import main
 from zephyr_cli.alamo import ThermoTail, derived_status, metadata_values
+from zephyr_cli.config import Credentials
 from zephyr_cli.main import final_watch_status
+from zephyr_cli.workspace import RunMarker
 
 
 def test_metadata_values_and_status() -> None:
@@ -46,3 +52,63 @@ def test_final_watch_status_marks_disappeared_process_interrupted(tmp_path: Path
     (tmp_path / "metadata").write_text("Status: running\n", encoding="utf-8")
 
     assert final_watch_status(tmp_path, "running") == "interrupted"
+
+
+def test_watcher_that_starts_after_alamo_finishes_posts_completed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "metadata").write_text(
+        "HASH = fast-run\nStatus = Complete\n",
+        encoding="utf-8",
+    )
+    requests: list[tuple[str, str, object | None]] = []
+
+    class FakeClient:
+        server = "https://zephyr.solids.group"
+
+        def __init__(self, _: Credentials) -> None:
+            pass
+
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: object | None = None,
+            query: object | None = None,
+        ) -> dict[str, object]:
+            assert query is None
+            requests.append((method, path, payload))
+            if (method, path) == ("POST", "/runs"):
+                assert isinstance(payload, dict)
+                assert payload["status"] == "completed"
+                return {"id": "fast-run-id"}
+            return {}
+
+    monkeypatch.setattr(
+        main,
+        "credentials_for_server",
+        lambda *args, **kwargs: Credentials("https://zephyr.solids.group", "secret"),
+    )
+    monkeypatch.setattr(main, "Client", FakeClient)
+
+    main.cmd_watch(
+        argparse.Namespace(
+            directory=str(tmp_path),
+            server=None,
+            name=None,
+            pid=None,
+            interval=30.0,
+            thermo="thermo.dat",
+        )
+    )
+
+    assert RunMarker.load(tmp_path).run_id == "fast-run-id"
+    terminal_heartbeats = [
+        payload
+        for method, path, payload in requests
+        if method == "POST" and path.endswith("/heartbeat")
+    ]
+    assert terminal_heartbeats
+    assert isinstance(terminal_heartbeats[-1], dict)
+    assert terminal_heartbeats[-1]["status"] == "completed"

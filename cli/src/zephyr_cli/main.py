@@ -24,6 +24,9 @@ from .client import ApiError, Client, api_request
 from .config import ConfigError, Credentials, normalize_server_url
 from .workspace import RunMarker, WorkspaceError
 
+TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
+WATCH_LOCAL_POLL_SECONDS = 0.25
+
 
 def utcnow() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -261,32 +264,31 @@ def post_terminal(
                 time.sleep(2**attempt)
 
 
-def final_watch_status(directory: Path, last_status: str) -> str:
+def local_watch_status(directory: Path) -> str:
     _, values = read_metadata(directory)
-    metadata_status, _ = derived_status(values)
-    if metadata_status in {"completed", "failed"}:
+    status, _ = derived_status(values)
+    return status
+
+
+def metadata_revision(directory: Path) -> tuple[int, int] | None:
+    try:
+        details = (directory / "metadata").stat()
+    except FileNotFoundError:
+        return None
+    return details.st_mtime_ns, details.st_size
+
+
+def final_watch_status(directory: Path, last_status: str) -> str:
+    metadata_status = local_watch_status(directory)
+    if metadata_status in TERMINAL_STATUSES:
         return metadata_status
-    if last_status in {"completed", "failed"}:
+    if last_status in TERMINAL_STATUSES:
         return last_status
     return "interrupted"
 
 
 def cmd_watch(args: argparse.Namespace) -> None:
     directory = Path(args.directory).resolve()
-    requested_server = args.server or os.environ.get("ZEPHYR_SERVER")
-    credentials = credentials_for_server(requested_server, login_if_missing=bool(requested_server))
-    client = Client(credentials)
-    try:
-        marker = RunMarker.load(directory)
-    except WorkspaceError:
-        import_directory(client, directory, args.name)
-        marker = RunMarker.load(directory)
-    if marker.server.rstrip("/") != credentials.server.rstrip("/"):
-        raise WorkspaceError(
-            f"This run belongs to {marker.server}, but zph is configured for {credentials.server}"
-        )
-    assert marker is not None
-    tail = ThermoTail(directory / args.thermo)
     stopping = threading.Event()
 
     def stop(_: int, __: object) -> None:
@@ -294,19 +296,56 @@ def cmd_watch(args: argparse.Namespace) -> None:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+
+    requested_server = args.server or os.environ.get("ZEPHYR_SERVER")
+    credentials = credentials_for_server(requested_server, login_if_missing=bool(requested_server))
+    client = Client(credentials)
+    try:
+        marker = RunMarker.load(directory)
+    except WorkspaceError:
+        initial_status = local_watch_status(directory)
+        if initial_status not in TERMINAL_STATUSES:
+            initial_status = "starting"
+        import_directory(client, directory, args.name, status=initial_status)
+        marker = RunMarker.load(directory)
+    if marker.server.rstrip("/") != credentials.server.rstrip("/"):
+        raise WorkspaceError(
+            f"This run belongs to {marker.server}, but zph is configured for {credentials.server}"
+        )
+    assert marker is not None
+    tail = ThermoTail(directory / args.thermo)
     print(f"Watching {marker.run_id}; heartbeat every {args.interval:g}s")
     last_status = "running"
+    heartbeat_interval = max(args.interval, WATCH_LOCAL_POLL_SECONDS)
+    next_heartbeat = time.monotonic()
+    previous_metadata_revision: object = object()
+    local_status = "running"
     while not stopping.is_set():
-        try:
-            last_status = sync_once(client, marker, directory, tail)
-        except ApiError as error:
-            print(f"zph: telemetry delayed: {error}", file=sys.stderr)
+        current_metadata_revision = metadata_revision(directory)
+        if current_metadata_revision != previous_metadata_revision:
+            local_status = local_watch_status(directory)
+            previous_metadata_revision = current_metadata_revision
+        if local_status in TERMINAL_STATUSES:
+            last_status = local_status
+            break
         if args.pid and not process_exists(args.pid):
-            stopping.set()
             break
-        if last_status in {"completed", "failed", "interrupted"}:
-            break
-        stopping.wait(args.interval)
+
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            try:
+                last_status = sync_once(client, marker, directory, tail)
+            except ApiError as error:
+                print(f"zph: telemetry delayed: {error}", file=sys.stderr)
+            if last_status in TERMINAL_STATUSES:
+                break
+            next_heartbeat = time.monotonic() + heartbeat_interval
+
+        wait_for = min(
+            WATCH_LOCAL_POLL_SECONDS,
+            max(0.0, next_heartbeat - time.monotonic()),
+        )
+        stopping.wait(wait_for)
     final = final_watch_status(directory, last_status)
     post_terminal(client, marker, directory, tail, final)
     print(f"Run marked {final}")
