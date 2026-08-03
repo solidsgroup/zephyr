@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import StatusPill from "./components/StatusPill";
-import { ArtifactStack } from "./pages/RunsPage";
+import { ArtifactStack } from "./components/RunBrowser";
 import type { Run } from "./types";
 
 describe("StatusPill", () => {
