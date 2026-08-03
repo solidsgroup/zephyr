@@ -21,7 +21,7 @@ from typing import Any
 from . import __version__
 from .alamo import ThermoTail, derived_status, metadata_digest, metadata_values
 from .client import ApiError, Client
-from .config import ConfigError, Credentials
+from .config import ConfigError, Credentials, normalize_server_url
 from .workspace import RunMarker, WorkspaceError
 
 
@@ -98,7 +98,7 @@ def import_directory(
 
 
 def cmd_login(args: argparse.Namespace) -> None:
-    server = args.server.rstrip("/")
+    server = normalize_server_url(args.server)
     token = args.token
     if not token:
         settings_url = f"{server}/settings/tokens?cli=1"
