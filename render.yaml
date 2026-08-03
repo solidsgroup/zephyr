@@ -48,7 +48,8 @@ databases:
   - name: zephyr-db
     databaseName: zephyr
     user: zephyr
-    plan: basic-1gb
+    plan: basic-256mb
     region: ohio
     postgresMajorVersion: "16"
-    storageAutoscalingEnabled: true
+    diskSizeGB: 1
+    storageAutoscalingEnabled: false

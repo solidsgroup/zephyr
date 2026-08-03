@@ -4,6 +4,13 @@
 Render's Ohio region. Render deploys every push to `master`, runs Alembic before
 traffic moves to the new image, and checks `/healthz`.
 
+The initial deployment is intentionally sized as one always-on Starter web
+service plus a Basic-256mb PostgreSQL instance with a 1 GB disk. Database
+storage autoscaling is disabled so that the monthly cost cannot grow without an
+intentional configuration change. Increase the database compute plan and disk
+size only after measurements show that Zephyr needs them; Render cannot shrink
+an existing PostgreSQL disk.
+
 ## One-time setup
 
 1. Create a Render Blueprint from `solidsgroup/zephyr`.
