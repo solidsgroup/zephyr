@@ -20,7 +20,7 @@ setup(
     extras_require={
         "dev": [
             "pytest>=7.4,<8; python_version < '3.8'",
-            "pytest>=8.3,<9; python_version >= '3.8'",
+            "pytest>=8.3,<10; python_version >= '3.8'",
             "ruff>=0.9,<1; python_version >= '3.9'",
         ]
     },
