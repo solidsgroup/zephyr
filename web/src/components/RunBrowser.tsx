@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "../api";
@@ -60,6 +60,16 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   ), [runs.data, search, status]);
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
 
+  function chooseRun(event: MouseEvent<HTMLAnchorElement>, run: Run) {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      setSelected((current) => ({ ...current, [run.id]: !current[run.id] }));
+      return;
+    }
+    setSelected({ [run.id]: true });
+    onClose();
+  }
+
   return (
     <aside className="run-browser" data-open={open} aria-label="Run browser">
       <header className="run-browser-header">
@@ -86,20 +96,20 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
           <option>unreachable</option>
         </select>
       </div>
-      <div className="run-browser-list">
+      <div className="run-browser-list" aria-label="Runs">
         {runs.isPending ? <div className="run-browser-state"><span className="spinner" />Loading runs…</div> :
           runs.isError ? <div className="run-browser-state error-text">Could not load runs.</div> :
           data.map((run) => {
             const active = location === `/runs/${run.id}`;
+            const chosen = Boolean(selected[run.id]);
             return (
-              <div className="run-browser-item" data-active={active} key={run.id}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(selected[run.id])}
-                  aria-label={`Select ${run.name} for comparison`}
-                  onChange={(event) => setSelected((current) => ({ ...current, [run.id]: event.target.checked }))}
-                />
-                <Link href={`/runs/${run.id}`} onClick={onClose} aria-current={active ? "page" : undefined}>
+              <div className="run-browser-item" data-active={active} data-selected={chosen} key={run.id}>
+                <Link
+                  href={`/runs/${run.id}`}
+                  onClickCapture={(event) => chooseRun(event, run)}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={`${run.name}${chosen ? ", selected for comparison" : ""}`}
+                >
                   <div className="run-artifact-slot"><ArtifactStack run={run} /></div>
                   <div className="run-browser-copy">
                     <div><strong title={run.name}>{run.name}</strong><StatusPill status={run.effective_status} /></div>
@@ -115,7 +125,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
       <footer className="run-browser-footer">
         {selectedIds.length >= 2 ?
           <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length} runs</button> :
-          <span>{selectedIds.length === 1 ? "Select one more run to compare" : "Updates every 15 seconds"}</span>}
+          <span>{selectedIds.length === 1 ? "Ctrl/Cmd-click another run to compare" : "Ctrl/Cmd-click to select multiple runs"}</span>}
       </footer>
     </aside>
   );
