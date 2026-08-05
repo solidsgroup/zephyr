@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from ..db import get_db
 from ..dependencies import current_user
-from ..metadata import parse_metadata, status_from_metadata
+from ..metadata import parse_metadata, slurm_context_from_metadata, status_from_metadata
 from ..models import (
     Project,
     ProjectMembership,
@@ -55,17 +55,38 @@ def effective_status(run: Run) -> str:
     return run.status
 
 
+def alamo_output_path(scheduler_details: dict[str, str]) -> str | None:
+    plot_file = scheduler_details.get("plot_file")
+    if not plot_file:
+        return None
+    if plot_file.startswith("/"):
+        return posixpath.normpath(plot_file)
+    submit_directory = scheduler_details.get("submit_directory")
+    if not submit_directory:
+        return None
+    return posixpath.normpath(posixpath.join(submit_directory, plot_file))
+
+
 def run_read(
     run: Run,
     artifact_count: int = 0,
     artifact_previews: list[ArtifactPreview] | None = None,
+    metadata_values: dict[str, str] | None = None,
 ) -> RunRead:
     data = {column.name: getattr(run, column.name) for column in Run.__table__.columns}
+    metadata_job_id, metadata_details = slurm_context_from_metadata(metadata_values or {})
+    metadata_details.update(data["scheduler_details"] or {})
+    data["scheduler_details"] = metadata_details
+    if not data["scheduler_job_id"] and metadata_job_id:
+        data["scheduler_job_id"] = metadata_job_id
     if not data["scheduler_system"] and str(data["scheduler_job_id"] or "").startswith(
         "SLURM_JOB_ID="
     ):
         data["scheduler_system"] = "slurm"
-    data["scheduler_details"] = data["scheduler_details"] or {}
+    if not data["scheduler_system"] and metadata_job_id:
+        data["scheduler_system"] = "slurm"
+    if not data["output_path"]:
+        data["output_path"] = alamo_output_path(metadata_details)
     data["effective_status"] = effective_status(run)
     data["artifact_count"] = artifact_count
     data["artifact_previews"] = artifact_previews or []
@@ -198,6 +219,7 @@ async def list_runs(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
+    include_scheduler_metadata: bool = False,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -211,7 +233,31 @@ async def list_runs(
         )
     runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)
-    return [run_read(run, *previews.get(run.id, (0, []))) for run in runs]
+    metadata_by_run: dict[uuid.UUID, dict[str, str]] = {}
+    if include_scheduler_metadata:
+        scheduler_run_ids = [
+            run.id
+            for run in runs
+            if run.scheduler_system == "slurm"
+            or str(run.scheduler_job_id or "").startswith("SLURM_JOB_ID=")
+        ]
+        if scheduler_run_ids:
+            rows = (
+                await db.execute(
+                    select(RunMetadata.run_id, RunMetadata.values).where(
+                        RunMetadata.run_id.in_(scheduler_run_ids)
+                    )
+                )
+            ).all()
+            metadata_by_run = {run_id: values for run_id, values in rows}
+    return [
+        run_read(
+            run,
+            *previews.get(run.id, (0, [])),
+            metadata_values=metadata_by_run.get(run.id),
+        )
+        for run in runs
+    ]
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
@@ -302,7 +348,7 @@ async def get_run(
         )
     )
     return {
-        "run": run_read(run),
+        "run": run_read(run, metadata_values=metadata.values if metadata else None),
         "metadata": MetadataRead.model_validate(metadata) if metadata else None,
         "output": RunOutputRead.model_validate(output) if output else None,
         "thermo": [
@@ -392,19 +438,17 @@ async def write_metadata(
     run.alamo_hash = parsed.values.get("HASH", run.alamo_hash)
     run.git_commit = parsed.values.get("Git_commit_hash", run.git_commit)
     run.host = parsed.values.get("Platform", run.host)
-    plot_file = parsed.values.get("plot_file") or parsed.values.get("amr.plot_file")
-    if plot_file:
-        scheduler_details = dict(run.scheduler_details or {})
-        scheduler_details["plot_file"] = plot_file
-        run.scheduler_details = scheduler_details
-        if not run.output_path:
-            submit_directory = scheduler_details.get("submit_directory")
-            if plot_file.startswith("/"):
-                run.output_path = posixpath.normpath(plot_file)
-            elif submit_directory:
-                run.output_path = posixpath.normpath(
-                    posixpath.join(submit_directory, plot_file)
-                )
+    metadata_job_id, metadata_details = slurm_context_from_metadata(parsed.values)
+    scheduler_details = dict(run.scheduler_details or {})
+    for key, value in metadata_details.items():
+        if not scheduler_details.get(key):
+            scheduler_details[key] = value
+    run.scheduler_details = scheduler_details
+    if metadata_job_id:
+        run.scheduler_job_id = run.scheduler_job_id or metadata_job_id
+        run.scheduler_system = run.scheduler_system or "slurm"
+    if not run.output_path:
+        run.output_path = alamo_output_path(scheduler_details)
     derived_status, progress = status_from_metadata(parsed.values)
     if derived_status:
         run.status = derived_status

@@ -109,7 +109,7 @@ describe("JobsPage", () => {
         node_count: "1",
         task_count: "16",
         cpus_per_task: "16",
-        gpus: "0,1",
+        job_gpu_ids: "0,1",
         gpus_on_node: "a100:2",
         submit_directory: "/work/alamo",
         plot_file: "output.481516",

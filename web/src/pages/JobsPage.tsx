@@ -52,7 +52,7 @@ function resourceNumber(raw: string | undefined) {
 
 function gpuCount(run: Run) {
   const details = run.scheduler_details;
-  const total = resourceNumber(details.gpus);
+  const total = resourceNumber(details.gpus ?? details.job_gpu_ids);
   if (total != null) return String(total);
   const perNode = resourceNumber(details.gpus_per_node ?? details.gpus_on_node);
   if (perNode != null) return `${perNode}/node`;
@@ -106,7 +106,7 @@ function JobRow({ run, now, isNew = false }: { run: Run; now: number; isNew?: bo
           <small>{details.cluster ? `${details.cluster} · ` : ""}{run.host ?? "Unknown host"}</small>
         </div>
         <div className="job-slurm">
-          <strong title={details.job_name}>{details.job_name ?? "Unnamed SLURM job"}</strong>
+          <strong title={details.job_name ?? run.name}>{details.job_name ?? run.name}</strong>
           <code>{jobId(run)}</code>
           <small>Partition: {details.partition ?? "unknown"}{details.qos ? ` · ${details.qos}` : ""}</small>
         </div>
@@ -156,7 +156,7 @@ export default function JobsPage() {
   const knownActiveIds = useRef<Set<string> | null>(null);
   const runs = useQuery({
     queryKey: ["runs", "slurm-jobs"],
-    queryFn: () => api<Run[]>("/runs?limit=1000"),
+    queryFn: () => api<Run[]>("/runs?limit=1000&include_scheduler_metadata=true"),
     refetchInterval: 5_000,
   });
   const jobs = useMemo(

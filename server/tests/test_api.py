@@ -1,9 +1,12 @@
 import hashlib
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from zephyr_server.db import SessionLocal
 from zephyr_server.main import app
+from zephyr_server.models import Run
 
 pytestmark = pytest.mark.asyncio
 
@@ -18,6 +21,19 @@ async def test_run_lifecycle_and_public_project() -> None:
             me = await client.get("/api/v1/auth/me")
             csrf = me.json()["csrf_token"]
             headers = {"X-CSRF-Token": csrf}
+            metadata_text = (
+                "HASH = abc123\nStatus = running\nProgress = 25\n"
+                "SLURM_JOB_ID = 481516\n"
+                "SLURM_JOB_NAME = rm-gpu-study\n"
+                "SLURM_CLUSTER_NAME = stampede3\n"
+                "SLURM_JOB_PARTITION = gpu-a100\n"
+                "SLURM_JOB_NUM_NODES = 2\n"
+                "SLURM_JOB_NODELIST = compute-[041-042]\n"
+                "SLURM_NTASKS = 32\n"
+                "SLURM_JOB_GPUS = 0,1,2,3\n"
+                "SLURM_SUBMIT_DIR = /work/alamo\n"
+                "plot_file = output.481516\n"
+            )
 
             created = await client.post(
                 "/api/v1/runs",
@@ -44,15 +60,25 @@ async def test_run_lifecycle_and_public_project() -> None:
 
             metadata = await client.put(
                 f"/api/v1/runs/{run_id}/metadata",
-                json={
-                    "raw_text": (
-                        "HASH = abc123\nStatus = running\nProgress = 25\n"
-                        "plot_file = output.481516\n"
-                    )
-                },
+                json={"raw_text": metadata_text},
                 headers=headers,
             )
             assert metadata.json()["values"]["HASH"] == "abc123"
+
+            # Recreate a legacy row that retained metadata but not scheduler columns.
+            async with SessionLocal() as db:
+                legacy_run = await db.get(Run, uuid.UUID(run_id))
+                assert legacy_run is not None
+                legacy_run.scheduler_details = {}
+                legacy_run.output_path = None
+                await db.commit()
+            listed = await client.get("/api/v1/runs?include_scheduler_metadata=true")
+            listed_run = next(run for run in listed.json() if run["id"] == run_id)
+            assert listed_run["scheduler_details"]["job_name"] == "rm-gpu-study"
+            assert listed_run["scheduler_details"]["node_count"] == "2"
+            assert listed_run["scheduler_details"]["task_count"] == "32"
+            assert listed_run["scheduler_details"]["job_gpu_ids"] == "0,1,2,3"
+            assert listed_run["output_path"] == "/work/alamo/output.481516"
 
             output = await client.put(
                 f"/api/v1/runs/{run_id}/output",
@@ -79,8 +105,7 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert len(sync_state.json()) == 1
             assert sync_state.json()[0]["alamo_hash"] == "abc123"
             assert sync_state.json()[0]["metadata_digest"] == hashlib.sha256(
-                b"HASH = abc123\nStatus = running\nProgress = 25\n"
-                b"plot_file = output.481516\n"
+                metadata_text.encode()
             ).hexdigest()
             assert sync_state.json()[0]["stdout_digest"] == output.json()["stdout_digest"]
 
