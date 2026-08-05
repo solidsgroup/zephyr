@@ -17,7 +17,7 @@ export default function RunsPage() {
   return (
     <div className="workspace-welcome">
       <span className="welcome-mark">Z</span>
-      <p className="eyebrow">ALAMO WORKSPACE</p>
+      <p className="eyebrow">Alamo workspace</p>
       <h1>Your runs will appear here</h1>
       <p>Post a simulation with <code>--post</code>, or add existing output from your terminal.</p>
       <pre><span>$</span> zph add output/</pre>

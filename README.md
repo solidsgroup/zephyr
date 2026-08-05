@@ -1,9 +1,9 @@
 # Zephyr
 
-**Z**ero-effort **E**xecution **P**rovenance and **H**ealth for **Y**our ALAMO **R**uns.
+**Z**ero-effort **E**xecution **P**rovenance and **H**ealth for **Y**our Alamo **R**uns.
 
 Zephyr is the run registry and results workspace built for
-[ALAMO](https://github.com/solidsgroup/alamo). It keeps track of where a
+[Alamo](https://github.com/solidsgroup/alamo). It keeps track of where a
 simulation ran, the source revision and platform it used, whether it is still
 healthy, its `metadata` and `thermo.dat` records, and the files worth keeping.
 The interface takes inspiration from Weights & Biases, but the data model and
@@ -21,7 +21,7 @@ HTTP/JSON contract under `/api/v1`.
 ## What works in the first release
 
 - live run registry with heartbeats and stale-run detection;
-- ALAMO metadata parsing and append-only `thermo.dat` segments;
+- Alamo metadata parsing and append-only `thermo.dat` segments;
 - W&B-style run table, run detail, plots, and multi-run comparisons;
 - stacked artifact previews with a user-selected image thumbnail for each run;
 - content-addressed working artifacts in a group-owned Google Shared Drive;
@@ -58,7 +58,7 @@ zph run --directory /scratch/run-0043 -- alamo input
 ```
 
 `zph add` accepts one or more directories, metadata files, or wildcard patterns,
-then recursively discovers every ALAMO `metadata` file beneath the matches. It
+then recursively discovers every Alamo `metadata` file beneath the matches. It
 imports the associated metadata, `thermo.dat`, `out.log`, `diff.patch`, and
 final status. Running watchers refresh the captured terminal output alongside
 the heartbeat. Shell-expanded
@@ -67,7 +67,7 @@ work. Its summary distinguishes newly added records from existing records that
 were updated. Color is enabled for interactive terminals and disabled when
 output is piped or `NO_COLOR` is set. Numbered BoxLib data trees ending in
 `cell` or `node` are pruned from recursive discovery before they are entered.
-Discovery also stops beneath a run's `metadata` file and skips ALAMO
+Discovery also stops beneath a run's `metadata` file and skips Alamo
 source/vendor trees, virtual environments, VCS data, and package caches. Bulk
 registration uses a single catalog lookup and up to four concurrent syncs.
 
@@ -87,11 +87,11 @@ command and are grouped by run automatically. Use `--directory RUN_DIRECTORY`
 to explicitly associate every target with a single run instead.
 
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
-CI. Locally, the `HASH` in ALAMO's `metadata` file is the complete run identity;
+CI. Locally, the `HASH` in Alamo's `metadata` file is the complete run identity;
 Zephyr does not add a marker file to simulation directories, and credentials
 never live there.
 
-ALAMO authenticates `zph` as part of configuration, then starts the watcher only
+Alamo authenticates `zph` as part of configuration, then starts the watcher only
 for simulations given the boolean `--post` flag:
 
 ```console
@@ -131,11 +131,11 @@ npm --prefix web run build
 ## Architecture and operations
 
 See [architecture](docs/architecture.md),
-[ALAMO integration](docs/alamo-integration.md), and
+[Alamo integration](docs/alamo-integration.md), and
 [Render deployment](docs/deployment.md). The OpenAPI document is served at
 `/docs` and protocol compatibility is advertised by `/api/v1/meta`.
 
-Zephyr is intentionally not a scientific postprocessor. ALAMO or a user's
+Zephyr is intentionally not a scientific postprocessor. Alamo or a user's
 workflow creates scientific tables and images; Zephyr indexes, visualizes,
 compares, shares, and preserves those outputs.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import posixpath
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -391,6 +392,19 @@ async def write_metadata(
     run.alamo_hash = parsed.values.get("HASH", run.alamo_hash)
     run.git_commit = parsed.values.get("Git_commit_hash", run.git_commit)
     run.host = parsed.values.get("Platform", run.host)
+    plot_file = parsed.values.get("plot_file") or parsed.values.get("amr.plot_file")
+    if plot_file:
+        scheduler_details = dict(run.scheduler_details or {})
+        scheduler_details["plot_file"] = plot_file
+        run.scheduler_details = scheduler_details
+        if not run.output_path:
+            submit_directory = scheduler_details.get("submit_directory")
+            if plot_file.startswith("/"):
+                run.output_path = posixpath.normpath(plot_file)
+            elif submit_directory:
+                run.output_path = posixpath.normpath(
+                    posixpath.join(submit_directory, plot_file)
+                )
     derived_status, progress = status_from_metadata(parsed.values)
     if derived_status:
         run.status = derived_status

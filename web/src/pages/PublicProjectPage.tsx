@@ -36,7 +36,7 @@ function PublicProjectIndex({ slug }: { slug: string }) {
   if (project.isError) return <div className="public-shell"><div className="error-panel">This project is not publicly available.</div></div>;
   return <div className="public-shell">
     <header className="public-header"><Link className="brand" href="/"><span className="brand-mark">Z</span><span><strong>Zephyr</strong><small>Public project</small></span></Link><a className="button" href="/">Sign in</a></header>
-    <section className="public-hero"><p className="eyebrow">PUBLIC ALAMO COLLECTION</p><h1>{project.data.project.name}</h1><p>{project.data.project.description}</p></section>
+    <section className="public-hero"><p className="eyebrow">Public Alamo collection</p><h1>{project.data.project.name}</h1><p>{project.data.project.description}</p></section>
     <section className="panel table-panel"><div className="table-scroll"><table className="data-table"><thead><tr><th>Run</th><th>Status</th><th>Code</th><th>Updated</th></tr></thead><tbody>{project.data.runs.map((run) => <tr key={run.id}><td><div className="run-name"><Link href={`/public/${slug}/runs/${run.id}`}>{run.name}</Link></div></td><td><StatusPill status={run.effective_status} /></td><td><code>{run.git_commit?.slice(0, 9) ?? "—"}</code></td><td>{new Date(run.updated_at).toLocaleString()}</td></tr>)}</tbody></table></div></section>
   </div>;
 }

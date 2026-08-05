@@ -34,19 +34,19 @@ Login uses a short-lived browser link. If a browser cannot be opened on the
 machine running `zph`, copy the printed URL to any browser, sign in, and return
 to the waiting terminal. No API token needs to be copied through the clipboard.
 
-Every directory is identified by the `HASH` in its ALAMO `metadata` file. The
+Every directory is identified by the `HASH` in its Alamo `metadata` file. The
 CLI does not create a Zephyr-specific identity file in the run directory.
 
 `zph add PATH...` expands wildcard patterns, walks every matching path
-recursively, and imports each directory containing an ALAMO `metadata` file.
+recursively, and imports each directory containing an Alamo `metadata` file.
 Both `zph add output*` and `zph add 'output*'` work. Each result is clearly
 labeled as `ADDED`, `UPDATED`, `SKIPPED`, or `ERROR`; `thermo.dat` is imported
-when present, along with ALAMO's `out.log` and `diff.patch`. Watchers refresh
+when present, along with Alamo's `out.log` and `diff.patch`. Watchers refresh
 the captured terminal output as the simulation runs. Interactive output uses
 color; set `NO_COLOR=1` for plain output. Recursive scans prune numbered BoxLib
 data trees such as `00000cell` and `00000node` without entering them. A
 directory containing `metadata` is treated as a complete run root, so its
-potentially large descendants are not scanned. ALAMO source/vendor trees,
+potentially large descendants are not scanned. Alamo source/vendor trees,
 virtual environments, VCS data, and package caches are also excluded. Bulk
 registration resolves the server catalog once and synchronizes up to four runs
 concurrently.

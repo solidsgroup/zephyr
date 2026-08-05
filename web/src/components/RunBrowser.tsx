@@ -74,7 +74,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     <aside className="run-browser" data-open={open} aria-label="Run browser">
       <header className="run-browser-header">
         <div>
-          <p className="eyebrow">ALAMO WORKSPACE</p>
+          <p className="eyebrow">Alamo workspace</p>
           <h2>Runs <span>{runs.data?.length ?? 0}</span></h2>
         </div>
         <div className="run-browser-actions">

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api } from "../api";
 import StatusPill from "../components/StatusPill";
-import type { Run } from "../types";
+import type { Run, RunDetail } from "../types";
 
 const ACTIVE_STATUSES = new Set(["starting", "running", "unreachable"]);
 
@@ -40,48 +40,113 @@ function duration(start: string | null, end: string | null, now: number) {
   return `${seconds}s`;
 }
 
-function allocation(run: Run) {
+function resourceNumber(raw: string | undefined) {
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const parts = raw.split(",");
+  if (parts.every((part) => /^\d+$/.test(part))) return parts.length;
+  const counts = parts.map((part) => part.match(/(?:^|:)(\d+)$/)?.[1]);
+  if (counts.some((count) => count == null)) return null;
+  return counts.reduce((sum, count) => sum + Number(count), 0);
+}
+
+function gpuCount(run: Run) {
   const details = run.scheduler_details;
-  const parts: string[] = [];
-  if (details.node_count) parts.push(`${details.node_count} node${details.node_count === "1" ? "" : "s"}`);
-  if (details.task_count) parts.push(`${details.task_count} tasks`);
-  if (details.cpus_per_task) parts.push(`${details.cpus_per_task} CPU/task`);
-  else if (details.cpus_on_node) parts.push(`${details.cpus_on_node} CPU/node`);
-  if (details.gpus_on_node) parts.push(`${details.gpus_on_node} GPU/node`);
-  else if (details.gpus) parts.push(`${details.gpus} GPUs`);
-  return parts.length ? parts.join(" · ") : "Allocation details unavailable";
+  const total = resourceNumber(details.gpus);
+  if (total != null) return String(total);
+  const perNode = resourceNumber(details.gpus_per_node ?? details.gpus_on_node);
+  if (perNode != null) return `${perNode}/node`;
+  return "—";
+}
+
+function outputDirectory(run: Run) {
+  if (run.output_path) return run.output_path;
+  const details = run.scheduler_details;
+  const submit = details.submit_directory?.replace(/\/+$/, "");
+  const plotFile = details.plot_file?.replace(/^['"]|['"]$/g, "");
+  if (plotFile?.startsWith("/")) return plotFile;
+  if (submit && plotFile && plotFile !== ".") return `${submit}/${plotFile.replace(/^\.\//, "")}`;
+  if (submit && plotFile === ".") return submit;
+  return submit ?? null;
+}
+
+function ResourceCounts({ run }: { run: Run }) {
+  const details = run.scheduler_details;
+  const nodes = details.node_count ?? "—";
+  const tasks = details.task_count ?? "—";
+  const gpus = gpuCount(run);
+  return (
+    <div className="job-resource-counts">
+      <span aria-label={`${nodes} ${nodes === "1" ? "node" : "nodes"}`}><b>{nodes}</b> {nodes === "1" ? "node" : "nodes"}</span>
+      <span aria-label={`${tasks} ${tasks === "1" ? "task" : "tasks"}`}><b>{tasks}</b> {tasks === "1" ? "task" : "tasks"}</span>
+      <span aria-label={`${gpus} GPUs`}><b>{gpus}</b> GPUs</span>
+    </div>
+  );
 }
 
 function JobRow({ run, now, isNew = false }: { run: Run; now: number; isNew?: boolean }) {
+  const [stdoutOpen, setStdoutOpen] = useState(false);
   const details = run.scheduler_details;
   const active = ACTIVE_STATUSES.has(run.effective_status);
   const start = run.started_at ?? run.created_at;
   const end = active ? null : (run.ended_at ?? run.updated_at);
-  const output = run.output_path ?? details.submit_directory;
+  const output = outputDirectory(run);
+  const detail = useQuery({
+    queryKey: ["run", run.id],
+    queryFn: () => api<RunDetail>(`/runs/${run.id}`),
+    enabled: stdoutOpen,
+    refetchInterval: stdoutOpen && active ? 5_000 : false,
+  });
+  const stdoutLabel = `${stdoutOpen ? "Hide" : "Show"} stdout for ${details.job_name ?? run.name}`;
   return (
-    <Link className="job-row" data-new={isNew} href={`/runs/${run.id}`}>
-      <div className="job-identity">
-        <div className="job-state-line"><StatusPill status={run.effective_status} /><strong>{run.name}</strong></div>
-        <small>{details.job_name && details.job_name !== run.name ? details.job_name : run.host ?? "Unknown host"}</small>
+    <article className="job-record" data-new={isNew}>
+      <div className="job-row">
+        <div className="job-identity">
+          <div className="job-state-line"><StatusPill status={run.effective_status} /><Link href={`/runs/${run.id}`}>{run.name}</Link></div>
+          <small>{details.cluster ? `${details.cluster} · ` : ""}{run.host ?? "Unknown host"}</small>
+        </div>
+        <div className="job-slurm">
+          <strong title={details.job_name}>{details.job_name ?? "Unnamed SLURM job"}</strong>
+          <code>{jobId(run)}</code>
+          <small>Partition: {details.partition ?? "unknown"}{details.qos ? ` · ${details.qos}` : ""}</small>
+        </div>
+        <div className="job-allocation">
+          <ResourceCounts run={run} />
+          <small title={details.node_list}>{details.node_list ?? run.host ?? "Node list unavailable"}</small>
+          {details.constraints && <small>Constraint: {details.constraints}</small>}
+        </div>
+        <div className="job-timing">
+          <strong>{active ? duration(start, null, now) : `Ran ${duration(start, end, now)}`}</strong>
+          <small>{active ? `Started ${timestamp(start)}` : `Stopped ${timestamp(end)}`}</small>
+        </div>
+        <div className="job-output">
+          <div className="job-output-line">
+            <code title={output ?? undefined}>{output ?? "Output path unavailable"}</code>
+            <button type="button" aria-expanded={stdoutOpen} aria-label={stdoutLabel} onClick={() => setStdoutOpen((open) => !open)}><span>▤</span> stdout</button>
+          </div>
+          <small>Alamo output directory</small>
+        </div>
       </div>
-      <div className="job-slurm">
-        <code>{jobId(run)}</code>
-        <small>{details.partition ?? "Unknown partition"}{details.qos ? ` · ${details.qos}` : ""}</small>
+      {stdoutOpen && (
+        <section className="job-stdout" aria-live="polite">
+          <div><strong>Live stdout</strong>{detail.data?.output && <small>Updated {timestamp(detail.data.output.updated_at)}</small>}<Link href={`/runs/${run.id}`}>Open full run →</Link></div>
+          {detail.isPending && <p>Loading current stdout…</p>}
+          {detail.isError && <p>Current stdout could not be loaded.</p>}
+          {detail.data && (detail.data.output ? <><pre>{detail.data.output.stdout || "No output has been written yet."}</pre>{detail.data.output.stdout_truncated && <small>Showing the most recent 1 MB.</small>}</> : <p>No stdout has been posted for this run yet.</p>)}
+        </section>
+      )}
+    </article>
+  );
+}
+
+function JobTable({ jobs, now, newJobIds }: { jobs: Run[]; now: number; newJobIds?: Set<string> }) {
+  return (
+    <>
+      <div className="job-column-head"><span>Run</span><span>SLURM job</span><span>Resources</span><span>Runtime</span><span>Output / log</span></div>
+      <div className="job-list">
+        {jobs.map((run) => <JobRow key={run.id} run={run} now={now} isNew={newJobIds?.has(run.id)} />)}
       </div>
-      <div className="job-allocation">
-        <strong title={details.node_list}>{details.node_list ?? run.host ?? "Nodes unavailable"}</strong>
-        <small>{allocation(run)}</small>
-        {details.constraints && <small>Constraint: {details.constraints}</small>}
-      </div>
-      <div className="job-timing">
-        <strong>{active ? duration(start, null, now) : `Ran ${duration(start, end, now)}`}</strong>
-        <small>{active ? `Started ${timestamp(start)}` : `Stopped ${timestamp(end)}`}</small>
-      </div>
-      <div className="job-output">
-        <code title={output}>{output ?? "Output path unavailable"}</code>
-        <small>{details.submit_directory && output !== details.submit_directory ? `Submitted from ${details.submit_directory}` : "ALAMO output directory"}</small>
-      </div>
-    </Link>
+    </>
   );
 }
 
@@ -105,6 +170,14 @@ export default function JobsPage() {
     () => jobs.filter((run) => !ACTIVE_STATUSES.has(run.effective_status)).slice(0, 20),
     [jobs],
   );
+  const activeClusters = useMemo(() => {
+    const grouped = new Map<string, Run[]>();
+    activeJobs.forEach((run) => {
+      const cluster = run.scheduler_details.cluster?.trim() || "Unknown cluster";
+      grouped.set(cluster, [...(grouped.get(cluster) ?? []), run]);
+    });
+    return [...grouped.entries()];
+  }, [activeJobs]);
   const activeKey = activeJobs.map((run) => run.id).join(",");
 
   useEffect(() => {
@@ -136,7 +209,7 @@ export default function JobsPage() {
   return (
     <div className="jobs-page">
       <header className="page-header jobs-header">
-        <div><p className="eyebrow">SLURM MONITOR</p><h1>Running jobs</h1><p>Live allocation, runtime, and output locations for posted ALAMO jobs.</p></div>
+        <div><p className="eyebrow">SLURM MONITOR</p><h1>Running jobs</h1><p>Live allocation, runtime, and output locations for posted Alamo jobs.</p></div>
         <div className="jobs-live" data-refreshing={runs.isFetching}><i /><span>Live · 5 second refresh</span></div>
       </header>
 
@@ -147,22 +220,23 @@ export default function JobsPage() {
         <div><strong>{stoppedJobs.length}</strong><span>Recent stops</span></div>
       </section>
 
-      <section className="job-section" aria-live="polite">
-        <div className="job-section-heading"><div><p className="eyebrow">ACTIVE ALLOCATIONS</p><h2>On the cluster now</h2></div><span>{activeJobs.length} jobs</span></div>
-        <div className="job-column-head"><span>Run</span><span>SLURM</span><span>Allocation</span><span>Timing</span><span>Output</span></div>
-        <div className="job-list">
-          {activeJobs.map((run) => <JobRow key={run.id} run={run} now={now} isNew={newJobIds.has(run.id)} />)}
-          {!activeJobs.length && <div className="jobs-empty"><strong>No active SLURM jobs</strong><span>New jobs posted with <code>--post</code> will appear here within five seconds.</span></div>}
-        </div>
-      </section>
+      {activeClusters.map(([cluster, clusterJobs]) => (
+        <section className="job-section" aria-live="polite" key={cluster}>
+          <div className="job-section-heading"><div><p className="eyebrow">ACTIVE ALLOCATIONS</p><h2>On {cluster} now</h2></div><span>{clusterJobs.length} {clusterJobs.length === 1 ? "job" : "jobs"}</span></div>
+          <JobTable jobs={clusterJobs} now={now} newJobIds={newJobIds} />
+        </section>
+      ))}
+
+      {!activeJobs.length && (
+        <section className="job-section" aria-live="polite">
+          <div className="job-section-heading"><div><p className="eyebrow">ACTIVE ALLOCATIONS</p><h2>No cluster allocations</h2></div><span>0 jobs</span></div>
+          <div className="jobs-empty"><strong>No active SLURM jobs</strong><span>New jobs posted with <code>--post</code> will appear here within five seconds.</span></div>
+        </section>
+      )}
 
       <section className="job-section recent-jobs">
         <div className="job-section-heading"><div><p className="eyebrow">RECENT STOPS</p><h2>Finished and interrupted jobs</h2></div><span>Latest {stoppedJobs.length}</span></div>
-        <div className="job-column-head"><span>Run</span><span>SLURM</span><span>Allocation</span><span>Timing</span><span>Output</span></div>
-        <div className="job-list">
-          {stoppedJobs.map((run) => <JobRow key={run.id} run={run} now={now} />)}
-          {!stoppedJobs.length && <div className="jobs-empty"><span>No stopped SLURM jobs have been recorded yet.</span></div>}
-        </div>
+        {stoppedJobs.length ? <JobTable jobs={stoppedJobs} now={now} /> : <div className="jobs-empty"><span>No stopped SLURM jobs have been recorded yet.</span></div>}
       </section>
     </div>
   );

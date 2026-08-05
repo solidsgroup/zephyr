@@ -102,13 +102,19 @@ describe("JobsPage", () => {
       scheduler_job_id: "481516",
       scheduler_system: "slurm",
       scheduler_details: {
+        cluster: "stampede3",
+        job_name: "alamo-ignition",
         partition: "gpu-a100",
         node_list: "compute-041",
         node_count: "1",
+        task_count: "16",
         cpus_per_task: "16",
+        gpus: "0,1",
         gpus_on_node: "a100:2",
+        submit_directory: "/work/alamo",
+        plot_file: "output.481516",
       },
-      output_path: "/work/alamo/output.481516",
+      output_path: null,
       effective_status: "running",
       status: "running",
     };
@@ -117,8 +123,26 @@ describe("JobsPage", () => {
       id: "two",
       name: "Packing study",
       scheduler_job_id: "481517",
+      scheduler_details: {
+        ...first.scheduler_details,
+        cluster: "lonestar6",
+        job_name: "alamo-packing",
+        plot_file: "output.481517",
+      },
       output_path: "/work/alamo/output.481517",
     };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      run: first,
+      metadata: null,
+      output: {
+        stdout: "Advancing timestep 42\n",
+        stdout_truncated: false,
+        git_diff: "",
+        git_diff_truncated: false,
+        updated_at: "2026-08-03T20:01:00Z",
+      },
+      thermo: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
     const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
     queryClient.setQueryData(["runs", "slurm-jobs"], [first]);
 
@@ -128,13 +152,22 @@ describe("JobsPage", () => {
       </QueryClientProvider>,
     );
 
+    expect(screen.getByRole("heading", { name: "On stampede3 now" })).toBeInTheDocument();
+    expect(screen.getByText("alamo-ignition")).toBeInTheDocument();
     expect(screen.getByText("481516")).toBeInTheDocument();
-    expect(screen.getByText("gpu-a100")).toBeInTheDocument();
+    expect(screen.getByText("Partition: gpu-a100")).toBeInTheDocument();
     expect(screen.getByText("compute-041")).toBeInTheDocument();
+    expect(screen.getByLabelText("1 node")).toBeInTheDocument();
+    expect(screen.getByLabelText("16 tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("2 GPUs")).toBeInTheDocument();
     expect(screen.getByText("/work/alamo/output.481516")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Show stdout for alamo-ignition" }));
+    expect(await screen.findByText("Advancing timestep 42")).toBeInTheDocument();
+
     act(() => queryClient.setQueryData(["runs", "slurm-jobs"], [second, first]));
+    expect(await screen.findByRole("heading", { name: "On lonestar6 now" })).toBeInTheDocument();
     const arrival = await screen.findByRole("link", { name: /Packing study/ });
-    expect(arrival).toHaveAttribute("data-new", "true");
+    expect(arrival.closest(".job-record")).toHaveAttribute("data-new", "true");
   });
 });

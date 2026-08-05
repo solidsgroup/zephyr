@@ -24,7 +24,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Zephyr API",
-    description="Zero-effort Execution Provenance and Health for Your ALAMO Runs",
+    description="Zero-effort Execution Provenance and Health for Your Alamo Runs",
     version=__version__,
     lifespan=lifespan,
 )

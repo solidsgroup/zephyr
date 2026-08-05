@@ -78,10 +78,14 @@ def test_scheduler_context_captures_slurm_environment(
     }:
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("SLURM_JOB_ID", "481516")
+    monkeypatch.setenv("SLURM_JOB_NAME", "ignition-sweep")
     monkeypatch.setenv("SLURM_JOB_PARTITION", "gpu-a100")
+    monkeypatch.setenv("SLURM_CLUSTER_NAME", "stampede3")
     monkeypatch.setenv("SLURM_JOB_NODELIST", "compute-[041-042]")
     monkeypatch.setenv("SLURM_JOB_NUM_NODES", "2")
+    monkeypatch.setenv("SLURM_NTASKS", "32")
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "16")
+    monkeypatch.setenv("SLURM_GPUS", "4")
     monkeypatch.setenv("SLURM_GPUS_ON_NODE", "a100:2")
     monkeypatch.setenv("SLURM_SUBMIT_DIR", "/work/alamo")
 
@@ -90,12 +94,16 @@ def test_scheduler_context_captures_slurm_environment(
     assert system == "slurm"
     assert job_id == "481516"
     assert details == {
+        "cluster": "stampede3",
         "cpus_per_task": "16",
+        "gpus": "4",
         "gpus_on_node": "a100:2",
+        "job_name": "ignition-sweep",
         "node_count": "2",
         "node_list": "compute-[041-042]",
         "partition": "gpu-a100",
         "submit_directory": "/work/alamo",
+        "task_count": "32",
     }
 
 
@@ -103,7 +111,12 @@ def test_import_directory_posts_scheduler_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "metadata").write_text("HASH = slurm-run\n", encoding="utf-8")
+    output = tmp_path / "output.481516"
+    output.mkdir()
+    (output / "metadata").write_text(
+        "HASH = slurm-run\nplot_file = output.481516\n",
+        encoding="utf-8",
+    )
     requests: list[tuple[str, str, object | None]] = []
 
     class FakeClient:
@@ -126,11 +139,15 @@ def test_import_directory_posts_scheduler_context(
         lambda: (
             "slurm",
             "481516",
-            {"partition": "gpu-a100", "node_list": "compute-041"},
+            {
+                "partition": "gpu-a100",
+                "node_list": "compute-041",
+                "submit_directory": str(tmp_path),
+            },
         ),
     )
 
-    main.import_directory(FakeClient(), tmp_path)
+    main.import_directory(FakeClient(), output)
 
     payload = requests[0][2]
     assert isinstance(payload, dict)
@@ -139,8 +156,10 @@ def test_import_directory_posts_scheduler_context(
     assert payload["scheduler_details"] == {
         "partition": "gpu-a100",
         "node_list": "compute-041",
+        "plot_file": "output.481516",
+        "submit_directory": str(tmp_path),
     }
-    assert payload["output_path"] == str(tmp_path)
+    assert payload["output_path"] == str(output)
 
 
 def test_watcher_that_starts_after_alamo_finishes_posts_completed(

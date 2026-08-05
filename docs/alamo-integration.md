@@ -1,9 +1,9 @@
-# ALAMO integration contract
+# Alamo integration contract
 
-ALAMO launches `zph watch` as a sidecar. That keeps networking, authentication,
+Alamo launches `zph watch` as a sidecar. That keeps networking, authentication,
 retries, and protocol evolution outside the solver process.
 
-When ALAMO receives `--post`, it:
+When Alamo receives `--post`, it:
 
 1. discovers `zph` on `PATH` and starts `zph watch OUTPUT_DIRECTORY --pid PID`;
 2. continues the simulation even if the sidecar cannot start, while printing a
@@ -20,10 +20,10 @@ Authentication is a configuration step, separate from simulation execution:
 
 `configure` invokes `zph login`, which prints and opens a short-lived browser
 link and waits for Google login to complete. `zph` stores the resulting
-credential in the user's normal configuration directory. The ALAMO executable
+credential in the user's normal configuration directory. The Alamo executable
 accepts no Zephyr URL or credential; `--post` is strictly a boolean switch.
 
-For schedulers where `/proc/PID` is unavailable, run ALAMO through
+For schedulers where `/proc/PID` is unavailable, run Alamo through
 `zph run -- alamo ...`; this preserves the child exit code and records
 `completed`, `failed`, or `interrupted` accurately.
 

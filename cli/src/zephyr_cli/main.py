@@ -63,8 +63,10 @@ SLURM_DETAIL_ENVIRONMENT = {
     "constraints": "SLURM_JOB_CONSTRAINTS",
     "cpus_on_node": "SLURM_CPUS_ON_NODE",
     "cpus_per_task": "SLURM_CPUS_PER_TASK",
-    "gpus": "SLURM_JOB_GPUS",
+    "gpus": "SLURM_GPUS",
     "gpus_on_node": "SLURM_GPUS_ON_NODE",
+    "gpus_per_node": "SLURM_GPUS_PER_NODE",
+    "job_gpu_ids": "SLURM_JOB_GPUS",
     "job_name": "SLURM_JOB_NAME",
     "memory_per_cpu": "SLURM_MEM_PER_CPU",
     "memory_per_node": "SLURM_MEM_PER_NODE",
@@ -312,6 +314,17 @@ def import_directory(
     if not alamo_hash and not allow_missing_hash:
         raise WorkspaceError(f"No HASH found in {directory / 'metadata'}")
     scheduler_system, job_id, scheduler_details = scheduler_context()
+    plot_file = values.get("plot_file") or values.get("amr.plot_file")
+    if plot_file:
+        plot_file = plot_file.strip().strip("\"'")
+    submit_directory = scheduler_details.get("submit_directory")
+    if submit_directory:
+        try:
+            plot_file = str(directory.relative_to(Path(submit_directory).resolve()))
+        except ValueError:
+            pass
+    if plot_file:
+        scheduler_details["plot_file"] = plot_file
     payload = {
         "alamo_hash": alamo_hash,
         "name": name or values.get("Title") or directory.name,
@@ -396,7 +409,7 @@ def discover_run_directories(path: Path) -> tuple[Path, list[Path]]:
 
     if target.is_file():
         if target.name != "metadata":
-            raise WorkspaceError(f"{target} is not an ALAMO metadata file")
+            raise WorkspaceError(f"{target} is not an Alamo metadata file")
         return target.parent, [target.parent]
     if not target.is_dir():
         raise WorkspaceError(f"{target} is not a directory")
@@ -614,7 +627,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         )
 
     if not directories:
-        print(f"  {paint('○', ANSI_YELLOW, enabled=color)} No ALAMO runs found.")
+        print(f"  {paint('○', ANSI_YELLOW, enabled=color)} No Alamo runs found.")
         print()
         return
 
@@ -1177,7 +1190,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="zph", description="Zephyr client for ALAMO runs")
+    result = argparse.ArgumentParser(prog="zph", description="Zephyr client for Alamo runs")
     result.add_argument("--version", action="version", version=f"zph {__version__}")
     commands = result.add_subparsers(dest="subcommand", required=True)
 
@@ -1187,7 +1200,7 @@ def parser() -> argparse.ArgumentParser:
     login.add_argument("--token", help="use an existing API token instead of browser login")
     login.set_defaults(handler=cmd_login)
 
-    import_command = commands.add_parser("import", help="register an existing ALAMO run")
+    import_command = commands.add_parser("import", help="register an existing Alamo run")
     import_command.add_argument("directory", nargs="?", default=".")
     import_command.add_argument("--name")
     import_command.add_argument(
@@ -1199,9 +1212,9 @@ def parser() -> argparse.ArgumentParser:
 
     add = commands.add_parser(
         "add",
-        help="recursively register ALAMO runs beneath a path",
+        help="recursively register Alamo runs beneath a path",
         description=(
-            "Discover ALAMO metadata files recursively and add or update their Zephyr records."
+            "Discover Alamo metadata files recursively and add or update their Zephyr records."
         ),
     )
     add.add_argument(

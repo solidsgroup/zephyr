@@ -31,6 +31,7 @@ async def test_run_lifecycle_and_public_project() -> None:
                         "node_list": "compute-[041-042]",
                         "node_count": "2",
                         "gpus_on_node": "a100:2",
+                        "submit_directory": "/work/alamo",
                     },
                     "output_path": "/work/alamo/output.481516",
                 },
@@ -43,7 +44,12 @@ async def test_run_lifecycle_and_public_project() -> None:
 
             metadata = await client.put(
                 f"/api/v1/runs/{run_id}/metadata",
-                json={"raw_text": "HASH = abc123\nStatus = running\nProgress = 25\n"},
+                json={
+                    "raw_text": (
+                        "HASH = abc123\nStatus = running\nProgress = 25\n"
+                        "plot_file = output.481516\n"
+                    )
+                },
                 headers=headers,
             )
             assert metadata.json()["values"]["HASH"] == "abc123"
@@ -74,6 +80,7 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert sync_state.json()[0]["alamo_hash"] == "abc123"
             assert sync_state.json()[0]["metadata_digest"] == hashlib.sha256(
                 b"HASH = abc123\nStatus = running\nProgress = 25\n"
+                b"plot_file = output.481516\n"
             ).hexdigest()
             assert sync_state.json()[0]["stdout_digest"] == output.json()["stdout_digest"]
 
@@ -117,6 +124,8 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert public.json()["runs"][0]["id"] == run_id
 
             detail = await client.get(f"/api/v1/runs/{run_id}")
+            assert detail.json()["run"]["scheduler_details"]["plot_file"] == "output.481516"
+            assert detail.json()["run"]["output_path"] == "/work/alamo/output.481516"
             assert detail.json()["thermo"][0]["rows"][1]["values"]["temperature"] == 305.0
             assert detail.json()["output"]["git_diff"].startswith("diff --git")
 

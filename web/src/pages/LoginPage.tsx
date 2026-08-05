@@ -20,7 +20,7 @@ export default function LoginPage() {
       <section className="login-card">
         <div className="login-logo">Z</div>
         <p className="eyebrow">SOLID MECHANICS RESEARCH GROUP</p>
-        <h1>Keep every ALAMO run in sight.</h1>
+        <h1>Keep every Alamo run in sight.</h1>
         <p className="login-copy">Execution health, provenance, results, and reproducible artifacts in one shared workspace.</p>
         <a className="button button-primary button-large" href="/api/v1/auth/login">Continue with Google</a>
         <p className="login-note">Access is limited to <strong>@solids.group</strong> accounts.</p>
