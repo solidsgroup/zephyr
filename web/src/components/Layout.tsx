@@ -3,8 +3,9 @@ import { Link, useLocation } from "wouter";
 import type { User } from "../types";
 import RunBrowser from "./RunBrowser";
 
-function RailIcon({ name }: { name: "runs" | "compare" | "projects" | "settings" }) {
+function RailIcon({ name }: { name: "runs" | "jobs" | "compare" | "projects" | "settings" }) {
   if (name === "runs") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M5 12h14M5 17.5h14" /><circle cx="8" cy="6.5" r="1" /><circle cx="16" cy="12" r="1" /><circle cx="10" cy="17.5" r="1" /></svg>;
+  if (name === "jobs") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v13h-15zM7.5 9l2 2-2 2M12 14h4.5" /></svg>;
   if (name === "compare") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14M5 8l3-3 3 3M13 16l3 3 3-3" /></svg>;
   if (name === "projects") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7.5h6l2-2h7v13h-15z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18" /></svg>;
@@ -29,6 +30,7 @@ export default function Layout({ user, children }: { user: User; children: React
               setRunBrowserOpen(true);
             }
           }}><RailIcon name="runs" /></Link>
+          <Link href="/jobs" aria-label="Running jobs" data-label="Running jobs" className={active("/jobs") ? "active" : ""}><RailIcon name="jobs" /></Link>
           <Link href="/compare" aria-label="Compare" data-label="Compare" className={active("/compare") ? "active" : ""}><RailIcon name="compare" /></Link>
           <Link href="/projects" aria-label="Projects" data-label="Projects" className={active("/projects") ? "active" : ""}><RailIcon name="projects" /></Link>
         </nav>

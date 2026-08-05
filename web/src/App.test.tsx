@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
+import JobsPage from "./pages/JobsPage";
 import type { Run } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -23,6 +24,9 @@ function run(id: string, name: string): Run {
     host: "cluster",
     platform: null,
     scheduler_job_id: null,
+    scheduler_system: null,
+    scheduler_details: {},
+    output_path: null,
     git_commit: null,
     git_repository_url: null,
     command: [],
@@ -88,5 +92,49 @@ describe("RunBrowser", () => {
     expect(screen.getByRole("button", { name: "Compare 2 runs" })).toBeInTheDocument();
     expect(first.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
     expect(second.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
+  });
+});
+
+describe("JobsPage", () => {
+  it("shows SLURM context and marks newly arriving jobs for animation", async () => {
+    const first = {
+      ...run("one", "Ignition sweep"),
+      scheduler_job_id: "481516",
+      scheduler_system: "slurm",
+      scheduler_details: {
+        partition: "gpu-a100",
+        node_list: "compute-041",
+        node_count: "1",
+        cpus_per_task: "16",
+        gpus_on_node: "a100:2",
+      },
+      output_path: "/work/alamo/output.481516",
+      effective_status: "running",
+      status: "running",
+    };
+    const second = {
+      ...first,
+      id: "two",
+      name: "Packing study",
+      scheduler_job_id: "481517",
+      output_path: "/work/alamo/output.481517",
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    queryClient.setQueryData(["runs", "slurm-jobs"], [first]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <JobsPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("481516")).toBeInTheDocument();
+    expect(screen.getByText("gpu-a100")).toBeInTheDocument();
+    expect(screen.getByText("compute-041")).toBeInTheDocument();
+    expect(screen.getByText("/work/alamo/output.481516")).toBeInTheDocument();
+
+    act(() => queryClient.setQueryData(["runs", "slurm-jobs"], [second, first]));
+    const arrival = await screen.findByRole("link", { name: /Packing study/ });
+    expect(arrival).toHaveAttribute("data-new", "true");
   });
 });

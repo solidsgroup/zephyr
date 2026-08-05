@@ -19,6 +19,9 @@ export interface Run {
   host: string | null;
   platform: string | null;
   scheduler_job_id: string | null;
+  scheduler_system: string | null;
+  scheduler_details: Record<string, string>;
+  output_path: string | null;
   git_commit: string | null;
   git_repository_url: string | null;
   command: string[];

@@ -74,6 +74,9 @@ class RunCreate(BaseModel):
     host: str | None = Field(default=None, max_length=255)
     platform: str | None = Field(default=None, max_length=255)
     scheduler_job_id: str | None = Field(default=None, max_length=255)
+    scheduler_system: str | None = Field(default=None, max_length=30)
+    scheduler_details: dict[str, str] = Field(default_factory=dict)
+    output_path: str | None = Field(default=None, max_length=2000)
     git_commit: str | None = Field(default=None, max_length=128)
     git_repository_url: str | None = Field(default=None, max_length=500)
     command: list[str] = Field(default_factory=list)
@@ -112,6 +115,9 @@ class RunRead(BaseModel):
     host: str | None
     platform: str | None
     scheduler_job_id: str | None
+    scheduler_system: str | None
+    scheduler_details: dict[str, str]
+    output_path: str | None
     git_commit: str | None
     git_repository_url: str | None
     command: list[str]

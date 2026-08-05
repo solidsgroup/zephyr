@@ -55,6 +55,26 @@ ALAMO_SOURCE_DIRECTORIES = {
     "src",
     "zephyr",
 }
+SLURM_DETAIL_ENVIRONMENT = {
+    "account": "SLURM_JOB_ACCOUNT",
+    "array_job_id": "SLURM_ARRAY_JOB_ID",
+    "array_task_id": "SLURM_ARRAY_TASK_ID",
+    "cluster": "SLURM_CLUSTER_NAME",
+    "constraints": "SLURM_JOB_CONSTRAINTS",
+    "cpus_on_node": "SLURM_CPUS_ON_NODE",
+    "cpus_per_task": "SLURM_CPUS_PER_TASK",
+    "gpus": "SLURM_JOB_GPUS",
+    "gpus_on_node": "SLURM_GPUS_ON_NODE",
+    "job_name": "SLURM_JOB_NAME",
+    "memory_per_cpu": "SLURM_MEM_PER_CPU",
+    "memory_per_node": "SLURM_MEM_PER_NODE",
+    "node_count": "SLURM_JOB_NUM_NODES",
+    "node_list": "SLURM_JOB_NODELIST",
+    "partition": "SLURM_JOB_PARTITION",
+    "qos": "SLURM_JOB_QOS",
+    "submit_directory": "SLURM_SUBMIT_DIR",
+    "task_count": "SLURM_NTASKS",
+}
 SYNCED_METADATA_DIGESTS: dict[str, str] = {}
 SYNCED_OUTPUT_DIGESTS: dict[tuple[str, str], str] = {}
 
@@ -108,12 +128,28 @@ def git_repository_url(directory: Path) -> str | None:
     return url.rstrip("/") or None
 
 
-def scheduler_job_id() -> str | None:
-    for name in ("SLURM_JOB_ID", "PBS_JOBID", "LSB_JOBID", "JOB_ID"):
-        value = os.environ.get(name)
+def scheduler_context() -> tuple[str | None, str | None, dict[str, str]]:
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        details = {}
+        for name, variable in SLURM_DETAIL_ENVIRONMENT.items():
+            value = os.environ.get(variable)
+            if value:
+                details[name] = value
+        return "slurm", slurm_job_id, details
+    for system, variable in (
+        ("pbs", "PBS_JOBID"),
+        ("lsf", "LSB_JOBID"),
+        ("sge", "JOB_ID"),
+    ):
+        value = os.environ.get(variable)
         if value:
-            return f"{name}={value}"
-    return None
+            return system, value, {}
+    return None, None, {}
+
+
+def scheduler_job_id() -> str | None:
+    return scheduler_context()[1]
 
 
 def device_login(server: str, device_name: str | None = None) -> Credentials:
@@ -275,6 +311,7 @@ def import_directory(
     alamo_hash = values.get("HASH") or values.get("Hash")
     if not alamo_hash and not allow_missing_hash:
         raise WorkspaceError(f"No HASH found in {directory / 'metadata'}")
+    scheduler_system, job_id, scheduler_details = scheduler_context()
     payload = {
         "alamo_hash": alamo_hash,
         "name": name or values.get("Title") or directory.name,
@@ -282,11 +319,19 @@ def import_directory(
         "started_at": utcnow(),
         "host": socket.gethostname(),
         "platform": platform.platform(),
-        "scheduler_job_id": scheduler_job_id(),
+        "output_path": str(directory),
         "git_commit": values.get("Git_commit_hash") or git_commit(directory),
         "git_repository_url": git_repository_url(directory),
         "command": command or [],
     }
+    if scheduler_system and job_id:
+        payload.update(
+            {
+                "scheduler_job_id": job_id,
+                "scheduler_system": scheduler_system,
+                "scheduler_details": scheduler_details,
+            }
+        )
     run = client.request("POST", "/runs", payload)
     if text:
         client.request("PUT", f"/runs/{run['id']}/metadata", {"raw_text": text})

@@ -60,6 +60,11 @@ def run_read(
     artifact_previews: list[ArtifactPreview] | None = None,
 ) -> RunRead:
     data = {column.name: getattr(run, column.name) for column in Run.__table__.columns}
+    if not data["scheduler_system"] and str(data["scheduler_job_id"] or "").startswith(
+        "SLURM_JOB_ID="
+    ):
+        data["scheduler_system"] = "slurm"
+    data["scheduler_details"] = data["scheduler_details"] or {}
     data["effective_status"] = effective_status(run)
     data["artifact_count"] = artifact_count
     data["artifact_previews"] = artifact_previews or []

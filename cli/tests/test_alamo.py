@@ -66,6 +66,83 @@ def test_final_watch_status_marks_disappeared_process_interrupted(tmp_path: Path
     assert final_watch_status(tmp_path, "running") == "interrupted"
 
 
+def test_scheduler_context_captures_slurm_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable in {
+        "SLURM_JOB_ID",
+        "PBS_JOBID",
+        "LSB_JOBID",
+        "JOB_ID",
+        *main.SLURM_DETAIL_ENVIRONMENT.values(),
+    }:
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("SLURM_JOB_ID", "481516")
+    monkeypatch.setenv("SLURM_JOB_PARTITION", "gpu-a100")
+    monkeypatch.setenv("SLURM_JOB_NODELIST", "compute-[041-042]")
+    monkeypatch.setenv("SLURM_JOB_NUM_NODES", "2")
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "16")
+    monkeypatch.setenv("SLURM_GPUS_ON_NODE", "a100:2")
+    monkeypatch.setenv("SLURM_SUBMIT_DIR", "/work/alamo")
+
+    system, job_id, details = main.scheduler_context()
+
+    assert system == "slurm"
+    assert job_id == "481516"
+    assert details == {
+        "cpus_per_task": "16",
+        "gpus_on_node": "a100:2",
+        "node_count": "2",
+        "node_list": "compute-[041-042]",
+        "partition": "gpu-a100",
+        "submit_directory": "/work/alamo",
+    }
+
+
+def test_import_directory_posts_scheduler_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "metadata").write_text("HASH = slurm-run\n", encoding="utf-8")
+    requests: list[tuple[str, str, object | None]] = []
+
+    class FakeClient:
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: object | None = None,
+            query: object | None = None,
+        ) -> dict[str, object]:
+            assert query is None
+            requests.append((method, path, payload))
+            if (method, path) == ("POST", "/runs"):
+                return {"id": "run-id", "alamo_hash": "slurm-run"}
+            return {}
+
+    monkeypatch.setattr(
+        main,
+        "scheduler_context",
+        lambda: (
+            "slurm",
+            "481516",
+            {"partition": "gpu-a100", "node_list": "compute-041"},
+        ),
+    )
+
+    main.import_directory(FakeClient(), tmp_path)
+
+    payload = requests[0][2]
+    assert isinstance(payload, dict)
+    assert payload["scheduler_job_id"] == "481516"
+    assert payload["scheduler_system"] == "slurm"
+    assert payload["scheduler_details"] == {
+        "partition": "gpu-a100",
+        "node_list": "compute-041",
+    }
+    assert payload["output_path"] == str(tmp_path)
+
+
 def test_watcher_that_starts_after_alamo_finishes_posts_completed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -94,6 +171,7 @@ def test_watcher_that_starts_after_alamo_finishes_posts_completed(
             if (method, path) == ("POST", "/runs"):
                 assert isinstance(payload, dict)
                 assert payload["status"] == "completed"
+                assert payload["output_path"] == str(tmp_path)
                 return {"id": "fast-run-id", "alamo_hash": "fast-run"}
             return {}
 

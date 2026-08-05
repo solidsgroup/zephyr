@@ -21,11 +21,25 @@ async def test_run_lifecycle_and_public_project() -> None:
 
             created = await client.post(
                 "/api/v1/runs",
-                json={"name": "Richtmyer-Meshkov", "status": "running"},
+                json={
+                    "name": "Richtmyer-Meshkov",
+                    "status": "running",
+                    "scheduler_job_id": "481516",
+                    "scheduler_system": "slurm",
+                    "scheduler_details": {
+                        "partition": "gpu-a100",
+                        "node_list": "compute-[041-042]",
+                        "node_count": "2",
+                        "gpus_on_node": "a100:2",
+                    },
+                    "output_path": "/work/alamo/output.481516",
+                },
                 headers=headers,
             )
             assert created.status_code == 201
             run_id = created.json()["id"]
+            assert created.json()["scheduler_details"]["partition"] == "gpu-a100"
+            assert created.json()["output_path"] == "/work/alamo/output.481516"
 
             metadata = await client.put(
                 f"/api/v1/runs/{run_id}/metadata",
