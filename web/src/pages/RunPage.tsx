@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "wouter";
 import { api } from "../api";
+import CopyButton from "../components/CopyButton";
 import MetadataTable from "../components/MetadataTable";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
+import { alamoOutputDirectory, formatSlurmMemory, slurmGpuCount, slurmJobId } from "../slurm";
 import type { Artifact, Run, RunDetail } from "../types";
 
 function formatBytes(bytes: number) {
@@ -121,6 +123,45 @@ function commitReference(value: string) {
   return clean.match(/-g([0-9a-f]+)$/i)?.[1] ?? clean;
 }
 
+export function SlurmDetails({ run }: { run: Run }) {
+  if (run.scheduler_system !== "slurm" && !run.scheduler_job_id?.startsWith("SLURM_JOB_ID=")) return null;
+  const details = run.scheduler_details;
+  type SlurmRow = { label: string; value: string | null | undefined; code?: boolean; copy?: boolean; wide?: boolean };
+  const rows: SlurmRow[] = [
+    { label: "Output directory", value: alamoOutputDirectory(run), code: true, copy: true, wide: true },
+    { label: "Job name", value: details.job_name ?? run.name },
+    { label: "Job ID", value: slurmJobId(run), code: true },
+    { label: "Cluster", value: details.cluster },
+    { label: "Partition", value: details.partition },
+    { label: "QoS", value: details.qos },
+    { label: "Account", value: details.account },
+    { label: "Node list", value: details.node_list, code: true },
+    { label: "Nodes", value: details.node_count },
+    { label: "Tasks", value: details.task_count },
+    { label: "Tasks per node", value: details.tasks_per_node },
+    { label: "CPUs per task", value: details.cpus_per_task },
+    { label: "GPUs", value: slurmGpuCount(run) },
+    { label: "GPU IDs", value: details.job_gpu_ids, code: true },
+    { label: "Memory per node", value: formatSlurmMemory(details.memory_per_node) },
+    { label: "Memory per CPU", value: formatSlurmMemory(details.memory_per_cpu) },
+    { label: "Constraints", value: details.constraints },
+    { label: "Submit directory", value: details.submit_directory, code: true, copy: true, wide: true },
+    { label: "plot_file", value: details.plot_file, code: true, wide: true },
+  ];
+  const visibleRows = rows.filter((row): row is SlurmRow & { value: string } => Boolean(row.value));
+  return (
+    <section className="panel slurm-detail-panel">
+      <div className="panel-heading"><h2>SLURM</h2></div>
+      <table className="slurm-detail-table"><tbody>{visibleRows.map((row) => (
+        <tr key={row.label} data-wide={row.wide || undefined}>
+          <th>{row.label}</th>
+          <td>{row.code ? <code title={row.value}>{row.value}</code> : <span>{row.value}</span>}{row.copy && <CopyButton value={row.value} label={row.label.toLowerCase()} />}</td>
+        </tr>
+      ))}</tbody></table>
+    </section>
+  );
+}
+
 export default function RunPage() {
   const { runId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -157,6 +198,7 @@ export default function RunPage() {
           <div><small>Last heartbeat</small><strong>{run.last_heartbeat ? new Date(run.last_heartbeat).toLocaleString() : "—"}</strong></div>
           <div><small>Code revision</small><strong>{commit ? <a className="commit-link" href={`${repository}/commit/${encodeURIComponent(commit)}`} target="_blank" rel="noreferrer"><code>{run.git_commit!.slice(0, 12)}</code><span>↗</span></a> : "—"}</strong></div>
         </section>
+        <SlurmDetails run={run} />
         <section className="panel"><div className="panel-heading"><div><p className="eyebrow">LIVE SERIES</p><h2>Thermodynamics</h2></div></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>
       </>}
       {tab === "stdout" && <section className="panel output-panel"><div className="panel-heading"><div><p className="eyebrow">LIVE OUTPUT</p><h2>stdout</h2></div>{output && <span>Updated {new Date(output.updated_at).toLocaleTimeString()}</span>}</div>{output ? <><pre>{output.stdout || "No output has been written yet."}</pre>{output.stdout_truncated && <p className="output-note">Showing the most recent 1 MB.</p>}</> : <div className="empty-panel">No stdout has been posted for this run yet.</div>}</section>}

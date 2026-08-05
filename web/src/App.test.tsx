@@ -1,10 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
 import JobsPage from "./pages/JobsPage";
+import { SlurmDetails } from "./pages/RunPage";
 import type { Run } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -155,7 +156,7 @@ describe("JobsPage", () => {
     expect(screen.getByRole("heading", { name: "On stampede3 now" })).toBeInTheDocument();
     expect(screen.getByText("alamo-ignition")).toBeInTheDocument();
     expect(screen.getByText("481516")).toBeInTheDocument();
-    expect(screen.getByText("Partition: gpu-a100")).toBeInTheDocument();
+    expect(screen.getByText("gpu-a100")).toBeInTheDocument();
     expect(screen.getByText("compute-041")).toBeInTheDocument();
     expect(screen.getByLabelText("1 node")).toBeInTheDocument();
     expect(screen.getByLabelText("16 tasks")).toBeInTheDocument();
@@ -169,5 +170,40 @@ describe("JobsPage", () => {
     expect(await screen.findByRole("heading", { name: "On lonestar6 now" })).toBeInTheDocument();
     const arrival = await screen.findByRole("link", { name: /Packing study/ });
     expect(arrival.closest(".job-record")).toHaveAttribute("data-new", "true");
+  });
+});
+
+describe("SlurmDetails", () => {
+  it("shows processed scheduler context and copies the output directory", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const slurmRun = {
+      ...run("slurm", "output.11930715"),
+      scheduler_system: "slurm",
+      scheduler_job_id: "SLURM_JOB_ID=11930715",
+      scheduler_details: {
+        job_name: "lm3d-30mw-full-normal",
+        cluster: "nova",
+        partition: "nova",
+        node_count: "1",
+        task_count: "4",
+        job_gpu_ids: "0,1,2,3",
+        memory_per_node: "409600",
+        submit_directory: "/work/brunnels/alamo",
+        plot_file: "output.11930715",
+      },
+    };
+
+    render(<SlurmDetails run={slurmRun} />);
+    const panel = screen.getByRole("heading", { name: "SLURM" }).closest("section")!;
+    const table = within(panel);
+
+    expect(table.getByText("lm3d-30mw-full-normal")).toBeInTheDocument();
+    expect(table.getByText("11930715")).toBeInTheDocument();
+    expect(table.getByText("GPUs").closest("tr")).toHaveTextContent("4");
+    expect(table.getByText("Memory per node").closest("tr")).toHaveTextContent("400 GiB");
+    expect(table.getByText("/work/brunnels/alamo/output.11930715")).toBeInTheDocument();
+    fireEvent.click(table.getByRole("button", { name: "Copy output directory" }));
+    expect(writeText).toHaveBeenCalledWith("/work/brunnels/alamo/output.11930715");
   });
 });
