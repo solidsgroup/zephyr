@@ -57,6 +57,8 @@ async def test_run_lifecycle_and_public_project() -> None:
             run_id = created.json()["id"]
             assert created.json()["scheduler_details"]["partition"] == "gpu-a100"
             assert created.json()["output_path"] == "/work/alamo/output.481516"
+            searched = await client.get("/api/v1/runs?search=output.481516")
+            assert [run["id"] for run in searched.json()] == [run_id]
 
             metadata = await client.put(
                 f"/api/v1/runs/{run_id}/metadata",

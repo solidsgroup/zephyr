@@ -78,13 +78,21 @@ zph put '*.png' 'profiles/*.csv'
 zph put output/myfile.png
 zph list --status running
 zph compare HASH_A HASH_B
-zph get HASH --output restored-run
+zph get output.481516
 ```
 
 By default, `zph put` associates each file with the `metadata` file in that
 file's directory. Files from several output directories can be supplied in one
 command and are grouped by run automatically. Use `--directory RUN_DIRECTORY`
 to explicitly associate every target with a single run instead.
+
+`zph get` accepts an output-directory name, HASH, or Zephyr UID. It restores to
+the original output-directory name by default. If that name identifies several
+runs, an interactive terminal displays their HASH, UID, status, host or cluster,
+and update time and asks which one to use. If the local destination already
+exists, `zph` offers to use the next available name, choose another path, merge
+and overwrite conflicting files, or cancel. For scripts, use `--output PATH`,
+`--rename`, or `--overwrite` to make the collision policy explicit.
 
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
 CI. Locally, the `HASH` in Alamo's `metadata` file is the complete run identity;

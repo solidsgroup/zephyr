@@ -15,10 +15,11 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 
 from . import __version__
 from .alamo import ThermoTail, derived_status, metadata_digest, metadata_values
@@ -1091,6 +1092,230 @@ def safe_destination(root: Path, relative: str) -> Path:
     return target
 
 
+def path_basename(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().rstrip("/\\")
+    if not normalized:
+        return None
+    name = re.split(r"[/\\]", normalized)[-1]
+    return name if name not in {"", ".", ".."} else None
+
+
+def run_output_names(run: dict[str, Any]) -> list[str]:
+    details = run.get("scheduler_details")
+    plot_file = details.get("plot_file") if isinstance(details, dict) else None
+    names = [
+        name
+        for name in (path_basename(run.get("output_path")), path_basename(plot_file))
+        if name
+    ]
+    return list(dict.fromkeys(names))
+
+
+def preferred_run_directory(run: dict[str, Any]) -> str:
+    output_names = run_output_names(run)
+    if output_names:
+        return output_names[0]
+    name = path_basename(run.get("name"))
+    if name:
+        return name
+    return str(run.get("alamo_hash") or run.get("id") or "zephyr-run")
+
+
+def matching_runs(runs: list[dict[str, Any]], reference: str) -> list[dict[str, Any]]:
+    requested_name = path_basename(reference) or reference
+    hash_matches = [run for run in runs if run.get("alamo_hash") == reference]
+    if hash_matches:
+        return hash_matches
+    directory_matches = [run for run in runs if requested_name in run_output_names(run)]
+    if directory_matches:
+        return directory_matches
+    return [run for run in runs if run.get("name") in {reference, requested_name}]
+
+
+def merge_runs(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for run in group:
+            merged[str(run.get("id"))] = run
+    return list(merged.values())
+
+
+def describe_run_choice(run: dict[str, Any]) -> str:
+    directory = preferred_run_directory(run)
+    alamo_hash = str(run.get("alamo_hash") or "no HASH")
+    status = str(run.get("effective_status") or run.get("status") or "unknown")
+    details = run.get("scheduler_details")
+    cluster = details.get("cluster") if isinstance(details, dict) else None
+    location = cluster or run.get("host") or "unknown host"
+    updated = format_time(run.get("updated_at"))
+    return (
+        f"{directory}  |  HASH {alamo_hash}  |  {status}  |  {location}  |  {updated}\n"
+        f"       {run.get('name') or directory}  |  UID {run.get('id')}"
+    )
+
+
+def choose_run(
+    matches: list[dict[str, Any]],
+    reference: str,
+    *,
+    interactive: bool | None = None,
+    prompt: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    if not matches:
+        raise WorkspaceError(f"No Zephyr run found for {reference!r}")
+    if len(matches) == 1:
+        return matches[0]
+
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    choices = "\n".join(
+        f"  [{index}] {describe_run_choice(run)}"
+        for index, run in enumerate(matches, start=1)
+    )
+    if not interactive:
+        raise WorkspaceError(
+            f"More than one Zephyr run matches {reference!r}:\n{choices}\n"
+            "Run zph get again with one of the listed UIDs or HASH values."
+        )
+
+    print(f"More than one Zephyr run matches {reference!r}:")
+    print(choices)
+    read = prompt or input
+    while True:
+        try:
+            answer = read(f"Choose a run [1-{len(matches)}], or q to cancel: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise WorkspaceError("Restore cancelled; no files were downloaded") from None
+        if answer.lower() in {"q", "quit", "cancel"}:
+            raise WorkspaceError("Restore cancelled; no files were downloaded")
+        try:
+            selected = int(answer)
+        except ValueError:
+            selected = 0
+        if 1 <= selected <= len(matches):
+            return matches[selected - 1]
+        print(f"Enter a number from 1 to {len(matches)}, or q.")
+
+
+def find_run(
+    client: Client,
+    reference: str,
+    *,
+    interactive: bool | None = None,
+    prompt: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    try:
+        run_id = str(uuid.UUID(reference))
+    except ValueError:
+        run_id = None
+    if run_id:
+        detail = client.request("GET", f"/runs/{run_id}")
+        run = detail.get("run") if isinstance(detail, dict) else None
+        if not isinstance(run, dict):
+            raise WorkspaceError(f"Zephyr returned an invalid run for UID {reference}")
+        return run
+
+    query = [
+        ("search", reference),
+        ("limit", "1000"),
+        ("include_scheduler_metadata", "true"),
+    ]
+    searched = client.request("GET", "/runs", query=query)
+    matches = matching_runs(searched, reference)
+    if not matches:
+        # Older records can derive their output directory solely from metadata,
+        # which the server cannot filter before reading the metadata row.
+        recent = client.request(
+            "GET",
+            "/runs",
+            query=[("limit", "1000"), ("include_scheduler_metadata", "true")],
+        )
+        matches = matching_runs(merge_runs(searched, recent), reference)
+    return choose_run(matches, reference, interactive=interactive, prompt=prompt)
+
+
+def next_available_directory(path: Path) -> Path:
+    base_name = path.name or "zephyr-run"
+    parent = path.parent if path.name else path
+    counter = 2
+    while True:
+        candidate = parent / f"{base_name}-{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def prepare_restore_directory(
+    path: Path,
+    *,
+    overwrite: bool = False,
+    rename: bool = False,
+    interactive: bool | None = None,
+    prompt: Callable[[str], str] | None = None,
+) -> tuple[Path, bool]:
+    if overwrite and rename:
+        raise WorkspaceError("Choose only one of --overwrite or --rename")
+    destination = path.expanduser().resolve()
+    while destination.exists():
+        is_directory = destination.is_dir()
+        if overwrite:
+            if not is_directory:
+                raise WorkspaceError(
+                    f"{destination} already exists and is not a directory; "
+                    "use --output PATH or --rename"
+                )
+            return destination, True
+        alternate = next_available_directory(destination)
+        if rename:
+            print(f"{destination} already exists; restoring as {alternate.name}")
+            return alternate, False
+        if interactive is None:
+            interactive = sys.stdin.isatty()
+        if not interactive:
+            raise WorkspaceError(
+                f"Local path {destination} already exists. Use --output PATH to choose "
+                "another location, --rename to use the next available name "
+                f"({alternate.name}), or --overwrite to merge into the existing directory."
+            )
+
+        print(f"Local path already exists: {destination}")
+        print(f"  [1] Restore as {alternate.name}")
+        print("  [2] Choose another path")
+        if is_directory:
+            print("  [3] Merge into it and overwrite conflicting files")
+        print("  [q] Cancel")
+        read = prompt or input
+        default_prompt = (
+            "Choose [1/2/3/q] (default 1): "
+            if is_directory
+            else "Choose [1/2/q] (default 1): "
+        )
+        try:
+            answer = read(default_prompt).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            raise WorkspaceError("Restore cancelled; no files were downloaded") from None
+        if answer in {"", "1", "rename"}:
+            return alternate, False
+        if answer in {"2", "path"}:
+            try:
+                replacement = read("New destination: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                raise WorkspaceError("Restore cancelled; no files were downloaded") from None
+            if not replacement:
+                print("Enter a destination path.")
+                continue
+            destination = Path(replacement).expanduser().resolve()
+            continue
+        if is_directory and answer in {"3", "overwrite", "merge"}:
+            return destination, True
+        if answer in {"q", "quit", "cancel"}:
+            raise WorkspaceError("Restore cancelled; no files were downloaded")
+        print("Choose one of the displayed options.")
+    return destination, False
+
+
 def write_output(path: Path, content: bytes, overwrite: bool) -> None:
     if path.exists() and not overwrite:
         raise WorkspaceError(f"Refusing to overwrite {path}; pass --overwrite")
@@ -1100,18 +1325,27 @@ def write_output(path: Path, content: bytes, overwrite: bool) -> None:
 
 def cmd_get(args: argparse.Namespace) -> None:
     client = configured_client()
-    run = find_run_by_hash(client, args.alamo_hash)
+    run = find_run(client, args.reference)
     run_id = str(run["id"])
+    requested_root = Path(args.output or preferred_run_directory(run))
+    root, overwrite = prepare_restore_directory(
+        requested_root,
+        overwrite=args.overwrite,
+        rename=args.rename,
+    )
+    print(
+        f"Restoring {run.get('name') or preferred_run_directory(run)} "
+        f"(HASH {run.get('alamo_hash') or '-'}, UID {run_id})"
+    )
     run_data = client.request("GET", f"/runs/{run_id}")
-    root = Path(args.output or args.alamo_hash).resolve()
     root.mkdir(parents=True, exist_ok=True)
     metadata = run_data.get("metadata")
     if metadata:
-        write_output(root / "metadata", metadata["raw_text"].encode(), args.overwrite)
+        write_output(root / "metadata", metadata["raw_text"].encode(), overwrite)
     write_output(
         root / "zephyr-run.json",
         (json.dumps(run_data["run"], indent=2) + "\n").encode(),
-        args.overwrite,
+        overwrite,
     )
     thermo_lines: list[str] = []
     for series in run_data.get("thermo", []):
@@ -1128,7 +1362,7 @@ def cmd_get(args: argparse.Namespace) -> None:
         write_output(
             root / "thermo.dat",
             ("\n".join(thermo_lines) + "\n").encode(),
-            args.overwrite,
+            overwrite,
         )
     records = client.request("GET", f"/runs/{run_id}/artifacts")
     latest: dict[str, dict[str, Any]] = {}
@@ -1142,7 +1376,7 @@ def cmd_get(args: argparse.Namespace) -> None:
             "GET", f"/runs/{run_id}/artifacts/{record['id']}/download"
         )
         target = safe_destination(root, relative)
-        write_output(target, Client.download(downloadable["download_url"]), args.overwrite)
+        write_output(target, Client.download(downloadable["download_url"]), overwrite)
         print(f"downloaded {relative}")
     print(f"Restored run into {root}")
 
@@ -1253,10 +1487,23 @@ def parser() -> argparse.ArgumentParser:
     )
     put.set_defaults(handler=cmd_put)
 
-    get = commands.add_parser("get", help="restore a run and its latest artifacts")
-    get.add_argument("alamo_hash", metavar="HASH")
-    get.add_argument("--output", "-o")
-    get.add_argument("--overwrite", action="store_true")
+    get = commands.add_parser(
+        "get",
+        help="restore a run by output-directory name, HASH, or UID",
+    )
+    get.add_argument("reference", metavar="DIRECTORY|HASH|UID")
+    get.add_argument("--output", "-o", help="restore into this local directory")
+    collision = get.add_mutually_exclusive_group()
+    collision.add_argument(
+        "--rename",
+        action="store_true",
+        help="use the next available directory name if the destination exists",
+    )
+    collision.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="merge into an existing directory and overwrite conflicting files",
+    )
     get.set_defaults(handler=cmd_get)
 
     listing = commands.add_parser("list", help="list accessible runs")

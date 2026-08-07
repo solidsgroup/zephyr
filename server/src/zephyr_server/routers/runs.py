@@ -229,7 +229,11 @@ async def list_runs(
     if search:
         escaped = search.replace("%", r"\%").replace("_", r"\_")
         query = query.where(
-            or_(Run.name.ilike(f"%{escaped}%"), Run.alamo_hash.ilike(f"%{escaped}%"))
+            or_(
+                Run.name.ilike(f"%{escaped}%"),
+                Run.alamo_hash.ilike(f"%{escaped}%"),
+                Run.output_path.ilike(f"%{escaped}%"),
+            )
         )
     runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)

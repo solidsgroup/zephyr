@@ -13,7 +13,7 @@ zph add 'output*'
 zph watch . --pid 12345
 zph put '*.png'
 zph put output/myfile.png
-zph get HASH
+zph get output.481516
 ```
 
 On a cluster without `pipx`, recent packaging tools, or internet access from
@@ -55,5 +55,11 @@ concurrently.
 `zph put output/myfile.png` automatically selects the run described by
 `output/metadata`, and files from multiple run directories can be uploaded in
 one command. Pass `--directory RUN_DIRECTORY` to override this association.
+
+`zph get` accepts an output-directory name, HASH, or Zephyr UID and preserves
+the recorded output-directory name by default. Ambiguous names open a numbered
+chooser. Existing local destinations open a second chooser with safe rename,
+alternate-path, merge/overwrite, and cancel options. Non-interactive jobs can
+select the behavior with `--output PATH`, `--rename`, or `--overwrite`.
 
 See the repository's main README for the complete workflow.
