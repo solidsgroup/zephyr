@@ -49,10 +49,10 @@ describe("StatusPill", () => {
 });
 
 describe("ArtifactStack", () => {
-  it("shows selected and stacked run previews", () => {
+  it("shows selected and stacked run previews without autoplaying every video", async () => {
     const run = {
       artifact_count: 4,
-      thumbnail_artifact_id: "selected",
+      thumbnail_artifact_id: "movie",
       artifact_previews: [
         { id: "selected", logical_name: "temperature.png", path: "temperature.png", kind: "image", content_type: "image/png", download_url: "/temperature.png" },
         { id: "other", logical_name: "pressure.png", path: "pressure.png", kind: "image", content_type: "image/png", download_url: "/pressure.png" },
@@ -64,7 +64,9 @@ describe("ArtifactStack", () => {
 
     expect(screen.getByLabelText("4 artifacts")).toBeInTheDocument();
     expect(screen.getByAltText("temperature.png")).toBeInTheDocument();
-    expect(screen.getByLabelText("movie.webm")).toHaveAttribute("src", "/movie.webm");
+    const movie = await screen.findByLabelText("movie.webm");
+    expect(movie).toHaveAttribute("src", "/movie.webm");
+    expect(movie).not.toHaveAttribute("autoplay");
     expect(screen.getByText("+1")).toBeInTheDocument();
   });
 });

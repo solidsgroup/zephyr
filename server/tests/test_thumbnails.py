@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from zephyr_server.db import SessionLocal
 from zephyr_server.main import app
 from zephyr_server.models import ArtifactObject, RunArtifact
+from zephyr_server.search import refresh_run_search_document
 
 pytestmark = pytest.mark.asyncio
 
@@ -56,6 +57,8 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                     )
                     db.add_all([obj, record])
                     records.append(record)
+                await db.flush()
+                await refresh_run_search_document(db, run_id)
                 await db.commit()
                 selected_id = str(records[1].id)
                 log_id = str(records[2].id)

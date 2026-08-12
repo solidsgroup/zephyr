@@ -4,6 +4,7 @@ import { Link, useLocation } from "wouter";
 import { api } from "../api";
 import { isVideoContentType, isVisualContentType } from "../artifacts";
 import type { Project, Run, RunFacets } from "../types";
+import LazyVideo from "./LazyVideo";
 import StatusPill from "./StatusPill";
 
 function age(value: string | null) {
@@ -35,8 +36,10 @@ export function ArtifactStack({ run }: { run: Run }) {
           style={{ "--stack-index": index } as CSSProperties}
           title={artifact.logical_name}
         >
-          {artifact.download_url && isVideoContentType(artifact.content_type)
-            ? <video preload="metadata" autoPlay muted loop playsInline src={artifact.download_url} aria-label={artifact.logical_name} />
+          {artifact.download_url && isVideoContentType(artifact.content_type) && artifact.id === run.thumbnail_artifact_id
+            ? <LazyVideo src={artifact.download_url} label={artifact.logical_name} />
+            : artifact.download_url && isVideoContentType(artifact.content_type)
+              ? <span>▶</span>
             : artifact.download_url && isVisualContentType(artifact.content_type)
               ? <img loading="lazy" src={artifact.download_url} alt={artifact.logical_name} />
             : <span>{artifactGlyph(artifact.kind)}</span>}
@@ -60,7 +63,10 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [projectId, setProjectId] = useState("");
   const [projectNotice, setProjectNotice] = useState("");
   useEffect(() => {
-    const timer = window.setTimeout(() => setSearchQuery(search.trim()), 250);
+    const timer = window.setTimeout(() => {
+      const value = search.trim();
+      setSearchQuery(value.length >= 2 ? value : "");
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [search]);
   const runsPath = useMemo(() => {
@@ -74,12 +80,13 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   }, [searchQuery, site, status, thumbnail]);
   const runs = useQuery({
     queryKey: ["runs", "browser", searchQuery, status, site, thumbnail],
-    queryFn: () => api<Run[]>(runsPath),
+    queryFn: ({ signal }) => api<Run[]>(runsPath, { signal }),
     refetchInterval: 15_000,
+    placeholderData: (previous) => previous,
   });
   const facets = useQuery({
     queryKey: ["runs", "facets"],
-    queryFn: () => api<RunFacets>("/runs/facets"),
+    queryFn: ({ signal }) => api<RunFacets>("/runs/facets", { signal }),
     refetchInterval: 60_000,
   });
   const data = runs.data ?? [];

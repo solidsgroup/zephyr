@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from ..artifact_links import artifact_download_url, decode_download_token
 from ..config import Settings, get_settings
@@ -20,6 +21,7 @@ from ..schemas import (
     ArtifactRead,
     RunRead,
 )
+from ..search import refresh_run_search_document
 from ..storage import GoogleDriveStorage, StorageError, StoredObjectNotFound, get_storage
 from .runs import get_accessible_run, is_preview_media, run_read
 
@@ -90,7 +92,12 @@ async def initiate_upload(
         raise HTTPException(status_code=409, detail="Digest already exists with a different size")
     if existing is not None:
         try:
-            storage.verify(existing.object_key, existing.sha256, existing.size)
+            await run_in_threadpool(
+                storage.verify,
+                existing.object_key,
+                existing.sha256,
+                existing.size,
+            )
         except StoredObjectNotFound:
             pass
         except StorageError as error:
@@ -100,7 +107,8 @@ async def initiate_upload(
             await db.commit()
             return ArtifactInitiated(already_present=True)
     try:
-        target = storage.initiate_upload(
+        target = await run_in_threadpool(
+            storage.initiate_upload,
             payload.sha256,
             payload.size,
             payload.content_type,
@@ -141,7 +149,7 @@ async def complete_upload(
         raise HTTPException(status_code=409, detail="Upload was not initiated")
     if not obj.verified:
         try:
-            storage.verify(obj.object_key, obj.sha256, obj.size)
+            await run_in_threadpool(storage.verify, obj.object_key, obj.sha256, obj.size)
         except StoredObjectNotFound as error:
             raise HTTPException(status_code=409, detail="Uploaded object was not found") from error
         except StorageError as error:
@@ -165,6 +173,8 @@ async def complete_upload(
         derivation=payload.derivation,
     )
     db.add(record)
+    await db.flush()
+    await refresh_run_search_document(db, run.id)
     await db.commit()
     await db.refresh(record, attribute_names=["object"])
     return artifact_read(record)
@@ -231,7 +241,8 @@ async def preview_artifact_content(
     if not is_preview_media(record):
         raise HTTPException(status_code=404, detail="Artifact preview not found")
     try:
-        download = storage.open_download_response(
+        download = await run_in_threadpool(
+            storage.open_download_response,
             record.object.object_key,
             request.headers.get("range"),
         )

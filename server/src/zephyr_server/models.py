@@ -164,6 +164,23 @@ class Run(TimestampMixin, Base):
     )
 
 
+class RunSearch(Base):
+    __tablename__ = "run_search"
+    __table_args__ = (
+        Index(
+            "ix_run_search_document_trgm",
+            "document",
+            postgresql_using="gin",
+            postgresql_ops={"document": "gin_trgm_ops"},
+        ),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    document: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
 class RunProject(Base):
     __tablename__ = "run_projects"
 

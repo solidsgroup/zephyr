@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from "wouter";
 import { api } from "../api";
 import { isVideoContentType, isVisualContentType } from "../artifacts";
 import CopyButton from "../components/CopyButton";
+import LazyVideo from "../components/LazyVideo";
 import MetadataTable from "../components/MetadataTable";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
@@ -20,7 +21,8 @@ function formatBytes(bytes: number) {
 
 function ArtifactMedia({ artifact, url, fullscreen = false }: { artifact: Artifact; url: string; fullscreen?: boolean }) {
   if (isVideoContentType(artifact.content_type)) {
-    return <video src={url} aria-label={artifact.logical_name} controls={fullscreen} autoPlay muted={!fullscreen} loop playsInline preload="metadata" />;
+    if (!fullscreen) return <LazyVideo src={url} label={artifact.logical_name} />;
+    return <video src={url} aria-label={artifact.logical_name} controls autoPlay loop playsInline preload="metadata" />;
   }
   return <img src={url} alt={artifact.logical_name} />;
 }

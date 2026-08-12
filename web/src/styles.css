@@ -204,7 +204,7 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .run-preview-card { --stack-index: 0; position: absolute; left: calc(var(--stack-index) * 9px); top: calc(var(--stack-index) * 2px); width: 48px; height: 38px; border: 2px solid white; border-radius: 7px; overflow: hidden; display: grid; place-items: center; background: #edf1f6; color: #7c8aa2; box-shadow: 0 2px 7px #10182824; z-index: calc(4 - var(--stack-index)); }
 .run-preview-card.selected { border-color: #84adff; box-shadow: 0 0 0 1px #246bfd, 0 3px 8px #1018282b; }
 .run-preview-card img { width: 100%; height: 100%; object-fit: cover; }
-.run-preview-card video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.run-preview-card video { width: 100%; height: 100%; object-fit: cover; }
 .run-preview-card span { font-size: 18px; }
 .run-preview-stack > small { position: absolute; right: 0; bottom: -1px; z-index: 6; background: #344054; color: white; border: 2px solid white; border-radius: 99px; min-width: 19px; padding: 1px 4px; font-size: 8px; text-align: center; }
 .run-preview-empty { width: 48px; height: 38px; display: grid; place-items: center; border: 1px solid #dfe4ec; border-radius: 7px; background: linear-gradient(145deg, #eef2f8, #f8fafc); color: #a7b0bf; font-size: 13px; font-weight: 700; }

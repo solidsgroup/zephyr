@@ -23,6 +23,7 @@ from ..models import (
     RunMetadata,
     RunOutput,
     RunProject,
+    RunSearch,
     ThermoPoint,
     ThermoSeries,
     User,
@@ -50,6 +51,7 @@ from ..schemas import (
     ThermoRow,
     ThermoSeriesRead,
 )
+from ..search import refresh_run_search_document, refresh_run_search_documents
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -161,14 +163,14 @@ async def artifact_previews_for_runs(
         if run.thumbnail_artifact_id and run.thumbnail_artifact_id not in by_id
     }
     if selected_ids:
-        selected = list(
+        selected_artifacts = list(
             await db.scalars(
                 select(RunArtifact)
                 .where(RunArtifact.id.in_(selected_ids))
                 .options(selectinload(RunArtifact.object))
             )
         )
-        by_id.update((record.id, record) for record in selected)
+        by_id.update((record.id, record) for record in selected_artifacts)
 
     result: dict[uuid.UUID, tuple[int, list[ArtifactPreview]]] = {}
     for run in runs:
@@ -183,10 +185,10 @@ async def artifact_previews_for_runs(
         chosen: list[RunArtifact] = []
         if (
             run.thumbnail_artifact_id
-            and (selected := by_id.get(run.thumbnail_artifact_id))
-            and selected.run_id == run.id
+            and (selected_artifact := by_id.get(run.thumbnail_artifact_id))
+            and selected_artifact.run_id == run.id
         ):
-            chosen.append(selected)
+            chosen.append(selected_artifact)
         chosen_paths = {record.path for record in chosen}
         chosen.extend(record for record in records if record.path not in chosen_paths)
         result[run.id] = (
@@ -252,51 +254,9 @@ async def list_runs(
     if search:
         escaped = search.replace("%", r"\%").replace("_", r"\_")
         pattern = f"%{escaped}%"
-        copy_match = (
-            select(RunCopy.id)
-            .where(
-                RunCopy.run_id == Run.id,
-                or_(
-                    RunCopy.path.ilike(pattern, escape="\\"),
-                    RunCopy.site.ilike(pattern, escape="\\"),
-                    RunCopy.host.ilike(pattern, escape="\\"),
-                ),
-            )
-            .correlate(Run)
-            .exists()
-        )
-        artifact_match = (
-            select(RunArtifact.id)
-            .where(
-                RunArtifact.run_id == Run.id,
-                or_(
-                    RunArtifact.path.ilike(pattern, escape="\\"),
-                    RunArtifact.logical_name.ilike(pattern, escape="\\"),
-                ),
-            )
-            .correlate(Run)
-            .exists()
-        )
-        metadata_match = (
-            select(RunMetadata.run_id)
-            .where(
-                RunMetadata.run_id == Run.id,
-                RunMetadata.raw_text.ilike(pattern, escape="\\"),
-            )
-            .correlate(Run)
-            .exists()
-        )
         query = query.where(
-            or_(
-                Run.name.ilike(pattern, escape="\\"),
-                Run.alamo_hash.ilike(pattern, escape="\\"),
-                Run.output_path.ilike(pattern, escape="\\"),
-                Run.host.ilike(pattern, escape="\\"),
-                Run.scheduler_job_id.ilike(pattern, escape="\\"),
-                Run.git_commit.ilike(pattern, escape="\\"),
-                copy_match,
-                artifact_match,
-                metadata_match,
+            Run.id.in_(
+                select(RunSearch.run_id).where(RunSearch.document.ilike(pattern, escape="\\"))
             )
         )
     if has_thumbnail is not None:
@@ -383,6 +343,8 @@ async def create_run(
     else:
         for key, value in payload.model_dump(exclude={"id"}, exclude_none=True).items():
             setattr(run, key, value)
+    await db.flush()
+    await refresh_run_search_document(db, run.id)
     await db.commit()
     await db.refresh(run)
     return run_read(run)
@@ -515,6 +477,8 @@ async def update_run_copies_batch(
             for name, value in values.items():
                 setattr(record, name, value)
             record.updated_at = utcnow()
+    await db.flush()
+    await refresh_run_search_documents(db, run_ids)
     await db.commit()
     return {"updated": len(payload.copies)}
 
@@ -544,6 +508,8 @@ async def update_run_copy(
         for key, value in values.items():
             setattr(record, key, value)
         record.updated_at = utcnow()
+    await db.flush()
+    await refresh_run_search_document(db, run.id)
     await db.commit()
     await db.refresh(record)
     return record
@@ -561,6 +527,8 @@ async def update_run(
         raise HTTPException(status_code=403, detail="Only the owner can edit this run")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(run, key, value)
+    await db.flush()
+    await refresh_run_search_document(db, run.id)
     await db.commit()
     await db.refresh(run)
     return run_read(run)
@@ -639,6 +607,8 @@ async def write_metadata(
         run.status = derived_status
     if progress is not None:
         run.progress = progress
+    await db.flush()
+    await refresh_run_search_document(db, run.id)
     await db.commit()
     await db.refresh(record)
     return MetadataRead.model_validate(record)
