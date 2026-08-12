@@ -6,6 +6,7 @@ import { isVideoContentType, isVisualContentType } from "../artifacts";
 import CopyButton from "../components/CopyButton";
 import LazyVideo from "../components/LazyVideo";
 import MetadataTable from "../components/MetadataTable";
+import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
 import { alamoOutputDirectory, formatSlurmMemory, slurmGpuCount, slurmJobId } from "../slurm";
@@ -208,7 +209,7 @@ export function SlurmDetails({ run }: { run: Run }) {
       <table className="slurm-detail-table"><tbody>{visibleRows.map((row) => (
         <tr key={row.label} data-wide={row.wide || undefined} data-path={row.copy || undefined}>
           <th>{row.label}</th>
-          <td>{row.code ? <code title={row.value}>{row.value}</code> : <span>{row.value}</span>}{row.copy && <CopyButton value={row.value} label={row.label.toLowerCase()} />}</td>
+          <td>{row.code ? <code title={row.value}>{row.copy ? <PathTail value={row.value} /> : row.value}</code> : <span>{row.value}</span>}{row.copy && <CopyButton value={row.value} label={row.label.toLowerCase()} />}</td>
         </tr>
       ))}</tbody></table>
     </section>
@@ -232,9 +233,9 @@ export function CopyLocations({ copies }: { copies: RunCopy[] }) {
         <div className="copy-location-header"><span>Site</span><span>Path</span><span>Contents</span><span>Last update</span></div>
         {copies.map((copy) => <article className="copy-location-row" key={copy.id}>
           <div className="copy-site"><strong>{copy.site}</strong>{copy.host !== copy.site && <small>{copy.host}</small>}</div>
-          <div className="copy-path"><code title={copy.path}>{copy.path}</code><CopyButton value={copy.path} label="path" compact /></div>
+          <div className="copy-path"><code><PathTail value={copy.path} /></code><CopyButton value={copy.path} label="path" compact /></div>
           <div className="copy-contents">
-            <strong>{copy.file_count.toLocaleString()} {copy.file_count_complete ? "files" : "indexed files"}</strong>
+            <strong>{copy.file_count.toLocaleString()} files</strong>
             {copy.total_size_bytes !== null && <small>{formatBytes(copy.total_size_bytes)}</small>}
             {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Data</span>}
           </div>

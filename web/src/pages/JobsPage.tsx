@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api } from "../api";
 import CopyButton from "../components/CopyButton";
+import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
 import { alamoOutputDirectory, slurmGpuCount, slurmJobId } from "../slurm";
 import type { Run, RunDetail } from "../types";
@@ -85,7 +86,7 @@ function JobRow({ run, now, isNew = false }: { run: Run; now: number; isNew?: bo
         </div>
         <div className="job-output">
           <div className="job-output-line">
-            <code title={output ?? undefined}>{output ?? "Output path unavailable"}</code>
+            <code>{output ? <PathTail value={output} /> : "Output path unavailable"}</code>
             {output && <CopyButton compact value={output} label="output directory" />}
             <button type="button" aria-expanded={stdoutOpen} aria-label={stdoutLabel} onClick={() => setStdoutOpen((open) => !open)}><span>▤</span> stdout</button>
           </div>

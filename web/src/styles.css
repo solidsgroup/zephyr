@@ -140,7 +140,7 @@ code, pre { font-family: "DM Mono", monospace; }
 .job-resource-counts span:last-child { padding-right: 0; border-right: 0; }
 .job-resource-counts b { color: #18202d; font-size: 10px; font-weight: 650; }
 .job-output-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.job-output-line code { flex: 1 1 auto; min-width: 0; direction: rtl; text-align: left; }
+.job-output-line code { flex: 1 1 auto; min-width: 0; }
 .job-output-line button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #d5dbe5; border-radius: 5px; padding: 4px 7px; background: white; color: #475467; font: 600 8px/1 system-ui, sans-serif; cursor: pointer; }
 .job-output-line button:hover, .job-output-line button[aria-expanded="true"] { border-color: #a9bfe9; background: #eff5ff; color: #175cd3; }
 .job-output-line button span { font-size: 10px; }
@@ -269,7 +269,7 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .slurm-detail-table td { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 0; color: #18202d; font-size: 10px; }
 .slurm-detail-table td code, .slurm-detail-table td span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slurm-detail-table td code { color: #344054; font-size: 9px; }
-.slurm-detail-table tr[data-path="true"] td code { direction: rtl; text-align: left; unicode-bidi: plaintext; }
+.slurm-detail-table tr[data-path="true"] td code { flex: 1 1 auto; }
 .slurm-detail-table td .copy-button { flex: 0 0 auto; margin-left: auto; }
 .copy-locations-panel { overflow: hidden; }
 .copy-locations-panel .panel-heading { border-bottom: 1px solid #e4e7ec; }
@@ -282,7 +282,7 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .copy-site strong, .copy-updated strong { overflow: hidden; color: #18202d; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .copy-site small, .copy-updated small, .copy-contents small { color: #98a2b3; font-size: 8px; }
 .copy-path { min-width: 0; display: flex; align-items: center; gap: 7px; }
-.copy-path code { flex: 1; min-width: 0; overflow: hidden; color: #344054; direction: rtl; font-size: 9px; text-align: left; text-overflow: ellipsis; unicode-bidi: plaintext; white-space: nowrap; }
+.copy-path code { flex: 1; min-width: 0; overflow: hidden; color: #344054; font-size: 9px; white-space: nowrap; }
 .copy-path .copy-button { flex: 0 0 auto; }
 .copy-contents { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; }
 .copy-contents strong { color: #18202d; font-size: 10px; }
@@ -411,7 +411,8 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .project-run-copy { min-width: 0; display: flex; flex-direction: column; }
 .project-run-copy > span { min-width: 0; display: flex; align-items: center; gap: 5px; }
 .project-run-copy strong { min-width: 0; overflow: hidden; color: #18202d; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.project-run-copy small { margin-top: 3px; overflow: hidden; color: #8d97a6; direction: rtl; font-size: 7px; text-align: left; text-overflow: ellipsis; unicode-bidi: plaintext; white-space: nowrap; }
+.project-run-copy small { margin-top: 3px; overflow: hidden; color: #8d97a6; font-size: 7px; white-space: nowrap; }
+.path-tail { display: block; width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
 .project-tree-state, .project-tree-empty { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 20px; color: #7c8799; font-size: 10px; text-align: center; }
 .project-tree-empty { flex-direction: column; }
 .project-tree-empty strong { color: #344054; }

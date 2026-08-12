@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api, currentUser } from "../api";
 import { ArtifactStack } from "../components/RunBrowser";
+import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
 import { selectionRange, useShiftPressed } from "../selection";
 import { RunRecord } from "./RunPage";
@@ -77,7 +78,7 @@ function ProjectRunRow({
       <span className="project-run-thumb"><ArtifactStack run={run} /></span>
       <span className="project-run-copy">
         <span><StatusPill status={run.effective_status} /><strong>{run.name}</strong></span>
-        <small>{run.output_path ?? run.host ?? "No output path"}</small>
+        <small>{run.output_path ? <PathTail value={run.output_path} /> : run.host ?? "No output path"}</small>
       </span>
     </button>
   );
@@ -338,11 +339,8 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     return { runIds, folderIds };
   }, [folders, placements, searchQuery, searchResults.data]);
   const shownChildFolders = useMemo(() => {
-    if (!searchView) return childFolders;
-    const result = new Map<string, ProjectFolder[]>();
-    for (const [key, values] of childFolders) result.set(key, values.filter((folder) => searchView.folderIds.has(folder.id)));
-    return result;
-  }, [childFolders, searchView]);
+    return childFolders;
+  }, [childFolders]);
   const shownRunsByFolder = useMemo(() => {
     if (!searchView) return runsByFolder;
     const result = new Map<string, ProjectRunPlacement[]>();

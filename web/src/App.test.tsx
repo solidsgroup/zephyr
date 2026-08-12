@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
+import PathTail from "./components/PathTail";
 import JobsPage from "./pages/JobsPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
@@ -12,6 +13,7 @@ import type { Artifact, Run, RunCopy } from "./types";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function run(id: string, name: string): Run {
@@ -96,6 +98,24 @@ describe("ArtifactViewer", () => {
     expect(within(view.container).getByLabelText("movie.webm")).toHaveAttribute("controls");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("PathTail", () => {
+  it("measures the available width and removes the beginning of long paths", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 100 } as DOMRect);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      font: "",
+      measureText: (text: string) => ({ width: text.length * 10 }),
+    } as CanvasRenderingContext2D);
+    const path = "/scratch/brunnels/alamo-runs/results/output.481516";
+
+    render(<PathTail value={path} />);
+
+    const rendered = screen.getByLabelText(path).textContent ?? "";
+    expect(rendered.startsWith("…")).toBe(true);
+    expect(rendered.endsWith(".481516")).toBe(true);
+    expect(rendered).not.toContain("/scratch");
   });
 });
 
@@ -264,6 +284,8 @@ describe("ProjectsPage", () => {
     fireEvent.change(page.getByLabelText("Search project runs"), { target: { value: "Simulation two" } });
     await waitFor(() => expect(view.container.querySelectorAll(".project-run-row")).toHaveLength(1));
     expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
+    expect(page.getByText("Cases")).toBeInTheDocument();
+    expect(page.getByText("GPU")).toBeInTheDocument();
   });
 });
 
@@ -409,7 +431,7 @@ describe("CopyLocations", () => {
     const locations = within(panel);
 
     expect(locations.getByText("1 known location")).toBeInTheDocument();
-    expect(locations.getByText("12 indexed files")).toBeInTheDocument();
+    expect(locations.getByText("12 files")).toBeInTheDocument();
     expect(locations.getByText("Data")).toBeInTheDocument();
     expect(locations.getByText("2 hr")).toBeInTheDocument();
     expect(locations.queryByText(/BoxLib trees|Shallow inventory|Simulation data|cell|node/i)).not.toBeInTheDocument();
