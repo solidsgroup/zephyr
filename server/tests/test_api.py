@@ -67,6 +67,76 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert metadata.json()["values"]["HASH"] == "abc123"
 
+            first_copy = await client.put(
+                f"/api/v1/runs/{run_id}/copies",
+                json={
+                    "site": "stampede3",
+                    "host": "login1",
+                    "path": "/scratch/brunnels/output.481516",
+                    "platform": "Linux",
+                    "file_count": 1250,
+                    "total_size_bytes": 987654321,
+                    "has_cell_data": True,
+                    "has_node_data": True,
+                    "manifest_digest": "a" * 64,
+                    "last_action": "sync",
+                },
+                headers=headers,
+            )
+            assert first_copy.status_code == 200
+            assert first_copy.json()["file_count"] == 1250
+            copy_id = first_copy.json()["id"]
+
+            refreshed_copy = await client.put(
+                f"/api/v1/runs/{run_id}/copies",
+                json={
+                    **{
+                        key: value
+                        for key, value in first_copy.json().items()
+                        if key
+                        in {
+                            "site",
+                            "host",
+                            "path",
+                            "platform",
+                            "file_count",
+                            "total_size_bytes",
+                            "has_cell_data",
+                            "has_node_data",
+                            "manifest_digest",
+                            "last_action",
+                        }
+                    },
+                    "file_count": 1251,
+                    "manifest_digest": "b" * 64,
+                    "last_action": "put",
+                },
+                headers=headers,
+            )
+            assert refreshed_copy.json()["id"] == copy_id
+            assert refreshed_copy.json()["file_count"] == 1251
+            assert refreshed_copy.json()["last_action"] == "put"
+
+            second_copy = await client.put(
+                f"/api/v1/runs/{run_id}/copies",
+                json={
+                    "site": "workstation",
+                    "host": "desktop",
+                    "path": "/home/user/output.481516",
+                    "platform": "Linux",
+                    "file_count": 4,
+                    "total_size_bytes": 4096,
+                    "has_cell_data": False,
+                    "has_node_data": False,
+                    "manifest_digest": "c" * 64,
+                    "last_action": "get",
+                },
+                headers=headers,
+            )
+            assert second_copy.status_code == 200
+            copies = await client.get(f"/api/v1/runs/{run_id}/copies")
+            assert len(copies.json()) == 2
+
             # Recreate a legacy row that retained metadata but not scheduler columns.
             async with SessionLocal() as db:
                 legacy_run = await db.get(Run, uuid.UUID(run_id))
@@ -155,6 +225,10 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert detail.json()["run"]["output_path"] == "/work/alamo/output.481516"
             assert detail.json()["thermo"][0]["rows"][1]["values"]["temperature"] == 305.0
             assert detail.json()["output"]["git_diff"].startswith("diff --git")
+            assert {copy["path"] for copy in detail.json()["copies"]} == {
+                "/scratch/brunnels/output.481516",
+                "/home/user/output.481516",
+            }
 
             deleted_project = await client.delete(f"/api/v1/projects/{project_id}", headers=headers)
             assert deleted_project.status_code == 204

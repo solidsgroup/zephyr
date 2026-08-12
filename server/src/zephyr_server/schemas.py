@@ -184,6 +184,27 @@ class RunOutputRead(BaseModel):
     updated_at: datetime
 
 
+class RunCopyWrite(BaseModel):
+    site: str = Field(min_length=1, max_length=255)
+    host: str = Field(min_length=1, max_length=255)
+    path: str = Field(min_length=1, max_length=2000)
+    platform: str | None = Field(default=None, max_length=255)
+    file_count: int = Field(ge=0)
+    total_size_bytes: int = Field(ge=0)
+    has_cell_data: bool = False
+    has_node_data: bool = False
+    manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    last_action: Literal["get", "put", "sync"]
+
+
+class RunCopyRead(RunCopyWrite):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    run_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class ThermoRow(BaseModel):
     sequence: int = Field(ge=0)
     values: dict[str, float | None]

@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
 import JobsPage from "./pages/JobsPage";
-import { SlurmDetails } from "./pages/RunPage";
-import type { Run } from "./types";
+import { CopyLocations, SlurmDetails } from "./pages/RunPage";
+import type { Run, RunCopy } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -205,5 +205,41 @@ describe("SlurmDetails", () => {
     expect(table.getByText("/work/brunnels/alamo/output.11930715")).toBeInTheDocument();
     fireEvent.click(table.getByRole("button", { name: "Copy output directory" }));
     expect(writeText).toHaveBeenCalledWith("/work/brunnels/alamo/output.11930715");
+  });
+});
+
+describe("CopyLocations", () => {
+  it("shows file counts, storage paths, and simulation data markers", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const copy = {
+      id: "copy-one",
+      run_id: "run-one",
+      site: "stampede3",
+      host: "login1",
+      path: "/scratch/brunnels/output.481516",
+      platform: "Linux",
+      file_count: 12345,
+      total_size_bytes: 2 * 1024 ** 3,
+      has_cell_data: true,
+      has_node_data: true,
+      manifest_digest: "a".repeat(64),
+      last_action: "sync",
+      created_at: "2026-08-12T12:00:00Z",
+      updated_at: "2026-08-12T13:00:00Z",
+    } satisfies RunCopy;
+
+    render(<CopyLocations copies={[copy]} />);
+    const panel = screen.getByRole("heading", { name: "Copies" }).closest("section")!;
+    const locations = within(panel);
+
+    expect(locations.getByText("1 known location")).toBeInTheDocument();
+    expect(locations.getByText("12,345 files")).toBeInTheDocument();
+    expect(locations.getByText("2.0 GB")).toBeInTheDocument();
+    expect(locations.getByText("Simulation data")).toBeInTheDocument();
+    expect(locations.getByText("cell")).toBeInTheDocument();
+    expect(locations.getByText("node")).toBeInTheDocument();
+    fireEvent.click(locations.getByRole("button", { name: "Copy path" }));
+    expect(writeText).toHaveBeenCalledWith("/scratch/brunnels/output.481516");
   });
 });

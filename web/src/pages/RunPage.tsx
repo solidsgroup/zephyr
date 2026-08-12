@@ -7,12 +7,14 @@ import MetadataTable from "../components/MetadataTable";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
 import { alamoOutputDirectory, formatSlurmMemory, slurmGpuCount, slurmJobId } from "../slurm";
-import type { Artifact, Run, RunDetail } from "../types";
+import type { Artifact, Run, RunCopy, RunDetail } from "../types";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes < 1024 ** 4) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
 }
 
 function ArtifactCard({
@@ -162,6 +164,38 @@ export function SlurmDetails({ run }: { run: Run }) {
   );
 }
 
+const copyAction = {
+  get: "get",
+  put: "put",
+  sync: "sync",
+};
+
+export function CopyLocations({ copies }: { copies: RunCopy[] }) {
+  return (
+    <section className="panel copy-locations-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">STORAGE INVENTORY</p><h2>Copies</h2></div>
+        <span>{copies.length} known {copies.length === 1 ? "location" : "locations"}</span>
+      </div>
+      {copies.length ? <div className="copy-location-table">
+        <div className="copy-location-header"><span>Site</span><span>Path</span><span>Contents</span><span>Last update</span></div>
+        {copies.map((copy) => <article className="copy-location-row" key={copy.id}>
+          <div className="copy-site"><strong>{copy.site}</strong>{copy.host !== copy.site && <small>{copy.host}</small>}</div>
+          <div className="copy-path"><code title={copy.path}>{copy.path}</code><CopyButton value={copy.path} label="path" compact /></div>
+          <div className="copy-contents">
+            <strong>{copy.file_count.toLocaleString()} files</strong>
+            <small>{formatBytes(copy.total_size_bytes)}</small>
+            {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Simulation data</span>}
+            {copy.has_cell_data && <span className="copy-data-badge">cell</span>}
+            {copy.has_node_data && <span className="copy-data-badge">node</span>}
+          </div>
+          <div className="copy-updated"><strong>{new Date(copy.updated_at).toLocaleString()}</strong><small>via zph {copyAction[copy.last_action]}</small></div>
+        </article>)}
+      </div> : <div className="copy-location-empty">No inventoried copies yet. Run <code>zph sync PATH</code> where a copy is stored.</div>}
+    </section>
+  );
+}
+
 export default function RunPage() {
   const { runId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -181,7 +215,7 @@ export default function RunPage() {
   });
   if (detail.isPending) return <div className="center-state"><span className="spinner" />Loading run…</div>;
   if (detail.isError) return <div className="error-panel">This run could not be loaded.</div>;
-  const { run, metadata, output, thermo } = detail.data;
+  const { run, metadata, output, copies = [], thermo } = detail.data;
   const commit = run.git_commit ? commitReference(run.git_commit) : null;
   const repository = run.git_repository_url ?? "https://github.com/solidsgroup/alamo";
   return (
@@ -199,6 +233,7 @@ export default function RunPage() {
           <div><small>Code revision</small><strong>{commit ? <a className="commit-link" href={`${repository}/commit/${encodeURIComponent(commit)}`} target="_blank" rel="noreferrer"><code>{run.git_commit!.slice(0, 12)}</code><span>↗</span></a> : "—"}</strong></div>
         </section>
         <SlurmDetails run={run} />
+        <CopyLocations copies={copies} />
         <section className="panel"><div className="panel-heading"><div><p className="eyebrow">LIVE SERIES</p><h2>Thermodynamics</h2></div></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>
       </>}
       {tab === "stdout" && <section className="panel output-panel"><div className="panel-heading"><div><p className="eyebrow">LIVE OUTPUT</p><h2>stdout</h2></div>{output && <span>Updated {new Date(output.updated_at).toLocaleTimeString()}</span>}</div>{output ? <><pre>{output.stdout || "No output has been written yet."}</pre>{output.stdout_truncated && <p className="output-note">Showing the most recent 1 MB.</p>}</> : <div className="empty-panel">No stdout has been posted for this run yet.</div>}</section>}

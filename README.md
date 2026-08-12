@@ -24,6 +24,8 @@ HTTP/JSON contract under `/api/v1`.
 - Alamo metadata parsing and append-only `thermo.dat` segments;
 - W&B-style run table, run detail, plots, and multi-run comparisons;
 - stacked artifact previews with a user-selected image thumbnail for each run;
+- an inventory of every known on-premises copy, including file counts and
+  BoxLib cell/node data markers;
 - content-addressed working artifacts in a group-owned Google Shared Drive;
 - private, group, and public projects with per-user sharing;
 - Google OIDC restricted to `@solids.group` plus revocable CLI tokens;
@@ -53,6 +55,7 @@ wrap a new execution:
 zph import /scratch/run-0042
 zph add /scratch/alamo-results
 zph add 'output*'
+zph sync /scratch/alamo-results
 zph watch /scratch/run-0042 --pid 38192
 zph run --directory /scratch/run-0043 -- alamo input
 ```
@@ -70,6 +73,16 @@ output is piped or `NO_COLOR` is set. Numbered BoxLib data trees ending in
 Discovery also stops beneath a run's `metadata` file and skips Alamo
 source/vendor trees, virtual environments, VCS data, and package caches. Bulk
 registration uses a single catalog lookup and up to four concurrent syncs.
+
+`zph sync PATH...` recursively discovers every Alamo copy beneath the supplied
+paths, including multiple directories with the same HASH. Unlike the fast
+discovery pass used by `zph add`, it deliberately inventories the full contents
+of each run, including BoxLib trees. Zephyr records the absolute path, storage
+site and host, regular-file count, total size, a filename/size/mtime fingerprint,
+and whether numbered `cell` or `node` data is present. It does not upload the
+raw dataset. Moving a copy creates a new known location; the previous location
+is retained with its last update time. Set `ZEPHYR_SITE` to give shared cluster
+storage a stable name when `SLURM_CLUSTER_NAME` is unavailable.
 
 Upload and restore results:
 
@@ -93,6 +106,8 @@ and update time and asks which one to use. If the local destination already
 exists, `zph` offers to use the next available name, choose another path, merge
 and overwrite conflicting files, or cancel. For scripts, use `--output PATH`,
 `--rename`, or `--overwrite` to make the collision policy explicit.
+Successful `zph get`, `zph put`, and `zph sync` operations refresh the local
+copy inventory and its last-update action.
 
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
 CI. Locally, the `HASH` in Alamo's `metadata` file is the complete run identity;

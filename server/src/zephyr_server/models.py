@@ -154,6 +154,10 @@ class Run(TimestampMixin, Base):
         cascade="all, delete",
         foreign_keys="RunArtifact.run_id",
     )
+    copies: Mapped[list[RunCopy]] = relationship(
+        back_populates="run",
+        cascade="all, delete",
+    )
     thumbnail_artifact: Mapped[RunArtifact | None] = relationship(
         foreign_keys=[thumbnail_artifact_id],
         post_update=True,
@@ -200,6 +204,29 @@ class RunOutput(TimestampMixin, Base):
     thermo_digest: Mapped[str | None] = mapped_column(String(64))
 
     run: Mapped[Run] = relationship(back_populates="output_record")
+
+
+class RunCopy(TimestampMixin, Base):
+    __tablename__ = "run_copies"
+    __table_args__ = (
+        UniqueConstraint("run_id", "site", "path", name="uq_run_copy_location"),
+        Index("ix_run_copies_run_updated", "run_id", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    site: Mapped[str] = mapped_column(String(255))
+    host: Mapped[str] = mapped_column(String(255))
+    path: Mapped[str] = mapped_column(String(2000))
+    platform: Mapped[str | None] = mapped_column(String(255))
+    file_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    total_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    has_cell_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_node_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64))
+    last_action: Mapped[str] = mapped_column(String(20))
+
+    run: Mapped[Run] = relationship(back_populates="copies")
 
 
 class ThermoSeries(TimestampMixin, Base):

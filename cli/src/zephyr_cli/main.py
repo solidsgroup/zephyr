@@ -11,6 +11,7 @@ import platform
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -18,6 +19,7 @@ import time
 import uuid
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -89,6 +91,15 @@ ANSI_GREEN = "\033[32m"
 ANSI_YELLOW = "\033[33m"
 ANSI_BLUE = "\033[34m"
 ANSI_CYAN = "\033[36m"
+
+
+@dataclass(frozen=True)
+class DirectoryInventory:
+    file_count: int
+    total_size_bytes: int
+    has_cell_data: bool
+    has_node_data: bool
+    manifest_digest: str
 
 
 def utcnow() -> str:
@@ -453,6 +464,138 @@ def display_run_path(directory: Path, root: Path) -> str:
     return "." if relative == Path(".") else str(relative)
 
 
+def directory_inventory(directory: Path) -> DirectoryInventory:
+    try:
+        root = directory.expanduser().resolve(strict=True)
+    except OSError as error:
+        raise WorkspaceError(f"Cannot inventory {directory}: {error}") from error
+    if not root.is_dir():
+        raise WorkspaceError(f"Cannot inventory {root}: not a directory")
+
+    file_count = 0
+    total_size_bytes = 0
+    has_cell_data = False
+    has_node_data = False
+    manifest = hashlib.sha256()
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    try:
+        for current, child_directories, filenames in os.walk(
+            root,
+            topdown=True,
+            onerror=raise_walk_error,
+            followlinks=False,
+        ):
+            current_path = Path(current)
+            retained_directories: list[str] = []
+            for name in sorted(child_directories):
+                child = current_path / name
+                if child.is_symlink():
+                    continue
+                retained_directories.append(name)
+                relative_directory = child.relative_to(root).as_posix()
+                manifest.update(b"directory\0")
+                manifest.update(
+                    relative_directory.encode("utf-8", errors="surrogateescape")
+                )
+                manifest.update(b"\n")
+                match = BOX_LIB_DATA_TREE.fullmatch(name)
+                if match:
+                    if name.lower().endswith("cell"):
+                        has_cell_data = True
+                    if name.lower().endswith("node"):
+                        has_node_data = True
+            child_directories[:] = retained_directories
+
+            for name in sorted(filenames):
+                path = current_path / name
+                try:
+                    details = path.lstat()
+                except FileNotFoundError:
+                    # A running simulation may replace a file while it is being scanned.
+                    continue
+                if not stat.S_ISREG(details.st_mode):
+                    continue
+                match = BOX_LIB_DATA_TREE.fullmatch(name)
+                if match:
+                    if name.lower().endswith("cell"):
+                        has_cell_data = True
+                    if name.lower().endswith("node"):
+                        has_node_data = True
+                relative = path.relative_to(root).as_posix()
+                manifest.update(relative.encode("utf-8", errors="surrogateescape"))
+                manifest.update(b"\0")
+                manifest.update(str(details.st_size).encode("ascii"))
+                manifest.update(b"\0")
+                manifest.update(str(details.st_mtime_ns).encode("ascii"))
+                manifest.update(b"\n")
+                file_count += 1
+                total_size_bytes += details.st_size
+    except OSError as error:
+        raise WorkspaceError(f"Cannot inventory {root}: {error}") from error
+
+    return DirectoryInventory(
+        file_count=file_count,
+        total_size_bytes=total_size_bytes,
+        has_cell_data=has_cell_data,
+        has_node_data=has_node_data,
+        manifest_digest=manifest.hexdigest(),
+    )
+
+
+def update_copy_location(
+    client: Client,
+    run_id: str,
+    directory: Path,
+    action: str,
+    inventory: DirectoryInventory | None = None,
+) -> dict[str, Any]:
+    root = directory.expanduser().resolve(strict=True)
+    snapshot = inventory or directory_inventory(root)
+    host = socket.gethostname()
+    return client.request(
+        "PUT",
+        f"/runs/{run_id}/copies",
+        {
+            "site": (
+                os.environ.get("ZEPHYR_SITE")
+                or os.environ.get("SLURM_CLUSTER_NAME")
+                or host
+            ),
+            "host": host,
+            "path": str(root),
+            "platform": platform.platform(),
+            "file_count": snapshot.file_count,
+            "total_size_bytes": snapshot.total_size_bytes,
+            "has_cell_data": snapshot.has_cell_data,
+            "has_node_data": snapshot.has_node_data,
+            "manifest_digest": snapshot.manifest_digest,
+            "last_action": action,
+        },
+    )
+
+
+def format_file_size(size: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def copy_data_label(inventory: DirectoryInventory) -> str:
+    kinds = []
+    if inventory.has_cell_data:
+        kinds.append("cell")
+    if inventory.has_node_data:
+        kinds.append("node")
+    return "+".join(kinds) if kinds else "copy"
+
+
 def status_style(status: str) -> str:
     if status == "completed":
         return ANSI_GREEN
@@ -770,6 +913,112 @@ def cmd_add(args: argparse.Namespace) -> None:
         raise WorkspaceError(f"{failed} run{'s' if failed != 1 else ''} could not be added")
 
 
+def cmd_sync(args: argparse.Namespace) -> None:
+    color = color_enabled()
+    rule = "─" * 72
+    patterns = args.paths or ["."]
+    print()
+    print(
+        f"  {paint('ZEPHYR', ANSI_BOLD, ANSI_CYAN, enabled=color)}"
+        f"  {paint('copy inventory', ANSI_DIM, enabled=color)}"
+    )
+    print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+    print(f"  Scan   {paint(' '.join(patterns), ANSI_BOLD, enabled=color)}", flush=True)
+
+    targets = expand_add_paths(patterns)
+    roots: list[Path] = []
+    discovered: set[Path] = set()
+    for target in targets:
+        root, directories = discover_run_directories(target)
+        roots.append(root)
+        discovered.update(directories)
+    directories = sorted(discovered, key=str)
+    if not directories:
+        raise WorkspaceError("No Alamo copies with metadata were found")
+    display_root = Path(os.path.commonpath([str(root) for root in roots]))
+
+    candidates: list[tuple[Path, str]] = []
+    failed = 0
+    for directory in directories:
+        try:
+            candidates.append((directory, require_alamo_hash(directory)))
+        except (WorkspaceError, OSError) as error:
+            failed += 1
+            print_add_record(
+                "ERROR",
+                "—",
+                "failed",
+                display_run_path(directory, display_root),
+                color=color,
+                detail=str(error),
+            )
+    if not candidates:
+        raise WorkspaceError("No copies with a valid HASH were found")
+
+    hashes = list(dict.fromkeys(alamo_hash for _, alamo_hash in candidates))
+    print(f"  Found  {len(candidates)} copies of {len(hashes)} simulations")
+    print("  Inventorying every regular file; BoxLib trees are included.", flush=True)
+    client = configured_client()
+    runs = fetch_sync_states(client, hashes)
+    for alamo_hash in hashes:
+        if alamo_hash in runs:
+            continue
+        directory = next(path for path, value in candidates if value == alamo_hash)
+        _, values = read_metadata(directory)
+        status, _ = derived_status(values)
+        run = import_directory(client, directory, status=status)
+        runs[alamo_hash] = {
+            "id": run["id"],
+            "alamo_hash": alamo_hash,
+        }
+
+    synced = 0
+    for directory, alamo_hash in candidates:
+        location = display_run_path(directory, display_root)
+        try:
+            inventory = directory_inventory(directory)
+            update_copy_location(
+                client,
+                str(runs[alamo_hash]["id"]),
+                directory,
+                "sync",
+                inventory,
+            )
+            synced += 1
+            details = (
+                f"{inventory.file_count:,} files, "
+                f"{format_file_size(inventory.total_size_bytes)}, "
+                f"{copy_data_label(inventory)}"
+            )
+            print_add_record(
+                "UPDATED",
+                alamo_hash,
+                "stored",
+                location,
+                color=color,
+                detail=details,
+            )
+        except (ApiError, WorkspaceError, OSError) as error:
+            failed += 1
+            print_add_record(
+                "ERROR",
+                alamo_hash,
+                "failed",
+                location,
+                color=color,
+                detail=str(error),
+            )
+
+    print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+    print(
+        f"  {paint('Done', ANSI_BOLD, enabled=color)}  "
+        f"{paint(str(synced), ANSI_CYAN, ANSI_BOLD, enabled=color)} locations updated"
+    )
+    print()
+    if failed:
+        raise WorkspaceError(f"{failed} cop{'y' if failed == 1 else 'ies'} could not be synced")
+
+
 def sync_once(
     client: Client,
     run_id: str,
@@ -1081,6 +1330,14 @@ def cmd_put(args: argparse.Namespace) -> None:
                 },
             )
             print(f"  {record['sha256'][:12]}  {record['path']}  v{record['version']}")
+        inventory = directory_inventory(directory)
+        update_copy_location(client, run_id, directory, "put", inventory)
+        print(
+            f"  {paint('↻ location', ANSI_CYAN, enabled=color)}  "
+            f"{inventory.file_count:,} files  ·  "
+            f"{format_file_size(inventory.total_size_bytes)}  ·  "
+            f"{copy_data_label(inventory)}"
+        )
 
 
 def safe_destination(root: Path, relative: str) -> Path:
@@ -1378,6 +1635,12 @@ def cmd_get(args: argparse.Namespace) -> None:
         target = safe_destination(root, relative)
         write_output(target, Client.download(downloadable["download_url"]), overwrite)
         print(f"downloaded {relative}")
+    inventory = directory_inventory(root)
+    update_copy_location(client, run_id, root, "get", inventory)
+    print(
+        f"Tracked local copy: {inventory.file_count:,} files, "
+        f"{format_file_size(inventory.total_size_bytes)}, {copy_data_label(inventory)}"
+    )
     print(f"Restored run into {root}")
 
 
@@ -1458,6 +1721,22 @@ def parser() -> argparse.ArgumentParser:
         help="directories, metadata files, or wildcard patterns (default: current directory)",
     )
     add.set_defaults(handler=cmd_add)
+
+    sync = commands.add_parser(
+        "sync",
+        help="recursively refresh local copy locations and file inventories",
+        description=(
+            "Find every Alamo metadata directory beneath PATH and refresh its local "
+            "copy location, file count, size, filename fingerprint, and BoxLib data flags."
+        ),
+    )
+    sync.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="directories, metadata files, or wildcard patterns (default: current directory)",
+    )
+    sync.set_defaults(handler=cmd_sync)
 
     watch = commands.add_parser("watch", help="post heartbeats, metadata, and thermo data")
     watch.add_argument("directory", nargs="?", default=".")

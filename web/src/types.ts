@@ -65,7 +65,25 @@ export interface RunDetail {
   run: Run;
   metadata: MetadataRecord | null;
   output: RunOutput | null;
+  copies: RunCopy[];
   thermo: ThermoSeries[];
+}
+
+export interface RunCopy {
+  id: string;
+  run_id: string;
+  site: string;
+  host: string;
+  path: string;
+  platform: string | null;
+  file_count: number;
+  total_size_bytes: number;
+  has_cell_data: boolean;
+  has_node_data: boolean;
+  manifest_digest: string;
+  last_action: "get" | "put" | "sync";
+  created_at: string;
+  updated_at: string;
 }
 
 export interface RunOutput {

@@ -1,3 +1,3 @@
 """Zephyr's dependency-free command-line client."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

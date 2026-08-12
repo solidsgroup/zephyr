@@ -259,6 +259,24 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .slurm-detail-table td code, .slurm-detail-table td span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slurm-detail-table td code { color: #344054; font-size: 9px; }
 .slurm-detail-table td .copy-button { flex: 0 0 auto; margin-left: auto; }
+.copy-locations-panel { overflow: hidden; }
+.copy-locations-panel .panel-heading { border-bottom: 1px solid #e4e7ec; }
+.copy-location-table { width: 100%; }
+.copy-location-header, .copy-location-row { display: grid; grid-template-columns: minmax(90px, .75fr) minmax(220px, 2.2fr) minmax(180px, 1.25fr) minmax(150px, 1fr); column-gap: 15px; align-items: center; }
+.copy-location-header { padding: 7px 16px; border-bottom: 1px solid #edf0f4; background: #f8fafc; color: #7c8799; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.copy-location-row { min-width: 0; padding: 10px 16px; border-bottom: 1px solid #edf0f4; }
+.copy-location-row:last-child { border-bottom: 0; }
+.copy-site, .copy-updated { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.copy-site strong, .copy-updated strong { overflow: hidden; color: #18202d; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.copy-site small, .copy-updated small, .copy-contents small { color: #98a2b3; font-size: 8px; }
+.copy-path { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.copy-path code { min-width: 0; overflow: hidden; color: #344054; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.copy-path .copy-button { flex: 0 0 auto; }
+.copy-contents { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; }
+.copy-contents strong { color: #18202d; font-size: 10px; }
+.copy-data-badge, .simulation-copy-badge { padding: 2px 5px; border: 1px solid #d8dee7; color: #667085; font-size: 7px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.simulation-copy-badge { border-color: #a6d8c2; background: #ecfdf3; color: #067647; }
+.copy-location-empty { min-height: 82px; display: flex; align-items: center; justify-content: center; color: #7c8799; font-size: 10px; }
 .commit-link { display: inline-flex; align-items: center; gap: 5px; color: #175cd3; text-decoration: none; }
 .commit-link:hover { text-decoration: underline; }
 .commit-link span { font-size: 10px; }
@@ -405,6 +423,9 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
   .slurm-detail-table tbody { grid-template-columns: 1fr; }
   .slurm-detail-table tr, .slurm-detail-table tr[data-wide="true"] { grid-column: auto; grid-template-columns: 105px minmax(0, 1fr); border-right: 0; border-bottom: 1px solid #edf0f4; }
   .slurm-detail-table tr:last-child { border-bottom: 0; }
+  .copy-location-header { display: none; }
+  .copy-location-row { grid-template-columns: minmax(80px, .7fr) minmax(0, 2fr); row-gap: 9px; }
+  .copy-contents, .copy-updated { grid-column: span 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .job-record[data-new="true"], .jobs-live[data-refreshing="true"] i { animation: none; }

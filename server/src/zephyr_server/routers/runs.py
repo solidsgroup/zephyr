@@ -19,6 +19,7 @@ from ..models import (
     ProjectMembership,
     Run,
     RunArtifact,
+    RunCopy,
     RunMetadata,
     RunOutput,
     RunProject,
@@ -33,6 +34,8 @@ from ..schemas import (
     Heartbeat,
     MetadataRead,
     MetadataWrite,
+    RunCopyRead,
+    RunCopyWrite,
     RunCreate,
     RunOutputRead,
     RunOutputWrite,
@@ -351,10 +354,18 @@ async def get_run(
             .order_by(ThermoSeries.segment)
         )
     )
+    copies = list(
+        await db.scalars(
+            select(RunCopy)
+            .where(RunCopy.run_id == run.id)
+            .order_by(RunCopy.updated_at.desc())
+        )
+    )
     return {
         "run": run_read(run, metadata_values=metadata.values if metadata else None),
         "metadata": MetadataRead.model_validate(metadata) if metadata else None,
         "output": RunOutputRead.model_validate(output) if output else None,
+        "copies": [RunCopyRead.model_validate(copy) for copy in copies],
         "thermo": [
             ThermoSeriesRead(
                 segment=item.segment,
@@ -366,6 +377,52 @@ async def get_run(
             for item in series
         ],
     }
+
+
+@router.get("/{run_id}/copies", response_model=list[RunCopyRead])
+async def list_run_copies(
+    run_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await get_accessible_run(db, user, run_id)
+    return list(
+        await db.scalars(
+            select(RunCopy)
+            .where(RunCopy.run_id == run_id)
+            .order_by(RunCopy.updated_at.desc())
+        )
+    )
+
+
+@router.put("/{run_id}/copies", response_model=RunCopyRead)
+async def update_run_copy(
+    run_id: uuid.UUID,
+    payload: RunCopyWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await get_accessible_run(db, user, run_id)
+    if run.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can update copy locations")
+    record = await db.scalar(
+        select(RunCopy).where(
+            RunCopy.run_id == run.id,
+            RunCopy.site == payload.site,
+            RunCopy.path == payload.path,
+        )
+    )
+    values = payload.model_dump()
+    if record is None:
+        record = RunCopy(run_id=run.id, **values)
+        db.add(record)
+    else:
+        for key, value in values.items():
+            setattr(record, key, value)
+        record.updated_at = utcnow()
+    await db.commit()
+    await db.refresh(record)
+    return record
 
 
 @router.patch("/{run_id}", response_model=RunRead)

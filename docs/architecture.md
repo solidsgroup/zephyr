@@ -35,6 +35,13 @@ indexes. `thermo.dat` is split into immutable-schema segments when a header
 changes or the local file is truncated. Sequence numbers make append retries
 idempotent.
 
+Copy locations are append-preserving catalog records keyed by run, storage
+site, and absolute path. `zph get`, `zph put`, and `zph sync` refresh a record's
+last update time and local inventory. A filename/size/mtime digest detects a
+changed tree without placing the file manifest or raw BoxLib data in Zephyr.
+Moving a directory therefore records its new location without silently erasing
+the last-known location of the old copy.
+
 ## Security boundary
 
 Browser users authenticate through Google OIDC and must present a verified

@@ -10,6 +10,7 @@ zph login https://zephyr.solids.group
 zph import .
 zph add /scratch/alamo-results
 zph add 'output*'
+zph sync /scratch/alamo-results
 zph watch . --pid 12345
 zph put '*.png'
 zph put output/myfile.png
@@ -51,6 +52,15 @@ virtual environments, VCS data, and package caches are also excluded. Bulk
 registration resolves the server catalog once and synchronizes up to four runs
 concurrently.
 
+`zph sync PATH...` finds every metadata-rooted copy recursively, including
+several copies with the same HASH, then inventories all regular files below
+each run. It records the absolute path, site/host, file count, total size, a
+filename/size/mtime fingerprint, and the presence of numbered BoxLib `cell` or
+`node` trees. This is an inventory operation: it does not upload the raw files.
+Old locations remain visible with their last update time after a copy is moved.
+Set `ZEPHYR_SITE` to a stable cluster or filesystem name if the hostname is too
+specific; `SLURM_CLUSTER_NAME` is used automatically when available.
+
 `zph put` looks for `metadata` beside each target file. Thus
 `zph put output/myfile.png` automatically selects the run described by
 `output/metadata`, and files from multiple run directories can be uploaded in
@@ -61,5 +71,6 @@ the recorded output-directory name by default. Ambiguous names open a numbered
 chooser. Existing local destinations open a second chooser with safe rename,
 alternate-path, merge/overwrite, and cancel options. Non-interactive jobs can
 select the behavior with `--output PATH`, `--rename`, or `--overwrite`.
+Successful gets and puts refresh the same copy inventory as `zph sync`.
 
 See the repository's main README for the complete workflow.

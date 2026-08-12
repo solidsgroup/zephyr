@@ -47,6 +47,8 @@ class FakeGetClient:
         self.requests.append((method, path, query))
         if (method, path) == ("GET", "/runs"):
             return self.searched if "search" in dict(query or []) else self.recent
+        if method == "PUT" and path.endswith("/copies"):
+            return payload
         if method == "GET" and path.endswith("/artifacts"):
             return []
         if method == "GET" and path.startswith("/runs/"):
@@ -172,3 +174,9 @@ def test_get_restores_to_recorded_output_directory_name(
 
     assert (tmp_path / "output.42" / "zephyr-run.json").is_file()
     assert not (tmp_path / "A descriptive title").exists()
+    copy_update = next(
+        request
+        for request in client.requests
+        if request[0] == "PUT" and request[1].endswith("/copies")
+    )
+    assert copy_update[1] == "/runs/run-id/copies"

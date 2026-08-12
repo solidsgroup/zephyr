@@ -80,6 +80,15 @@ def test_put_uses_metadata_beside_each_target(
     output = capsys.readouterr().out
     assert "HASH hash-a" in output
     assert "HASH hash-b" in output
+    locations = [
+        payload
+        for method, path, payload, _ in client.requests
+        if method == "PUT" and path.endswith("/copies")
+    ]
+    assert len(locations) == 2
+    assert {payload["last_action"] for payload in locations if isinstance(payload, dict)} == {
+        "put"
+    }
 
 
 def test_put_directory_option_overrides_target_directory(
