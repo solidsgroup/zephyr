@@ -219,8 +219,10 @@ describe("CopyLocations", () => {
       host: "login1",
       path: "/scratch/brunnels/output.481516",
       platform: "Linux",
-      file_count: 12345,
-      total_size_bytes: 2 * 1024 ** 3,
+      file_count: 12,
+      file_count_complete: false,
+      data_tree_count: 1248,
+      total_size_bytes: null,
       has_cell_data: true,
       has_node_data: true,
       manifest_digest: "a".repeat(64),
@@ -234,8 +236,8 @@ describe("CopyLocations", () => {
     const locations = within(panel);
 
     expect(locations.getByText("1 known location")).toBeInTheDocument();
-    expect(locations.getByText("12,345 files")).toBeInTheDocument();
-    expect(locations.getByText("2.0 GB")).toBeInTheDocument();
+    expect(locations.getByText("12 indexed files")).toBeInTheDocument();
+    expect(locations.getByText("1,248 BoxLib trees · Shallow inventory")).toBeInTheDocument();
     expect(locations.getByText("Simulation data")).toBeInTheDocument();
     expect(locations.getByText("cell")).toBeInTheDocument();
     expect(locations.getByText("node")).toBeInTheDocument();

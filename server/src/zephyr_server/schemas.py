@@ -190,6 +190,8 @@ class RunCopyWrite(BaseModel):
     path: str = Field(min_length=1, max_length=2000)
     platform: str | None = Field(default=None, max_length=255)
     file_count: int = Field(ge=0)
+    file_count_complete: bool = True
+    data_tree_count: int = Field(default=0, ge=0)
     total_size_bytes: int | None = Field(default=None, ge=0)
     has_cell_data: bool = False
     has_node_data: bool = False

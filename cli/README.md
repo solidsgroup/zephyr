@@ -65,16 +65,18 @@ registration resolves the server catalog once and synchronizes up to four runs
 concurrently.
 
 `zph sync PATH...` finds every metadata-rooted copy recursively, including
-several copies with the same HASH, then inventories filenames below each run.
-It records the absolute path, site/host, file count, path fingerprint, and the
-presence of numbered BoxLib `cell` or `node` trees. The normal scan avoids
-per-file stat calls and uses `~/.config/zephyr/sync-cache.json` to skip directory
-reads when all cached directory timestamps are unchanged. Use
-`zph sync --deep PATH` to additionally recompute total bytes and a size/mtime
-fingerprint. This is an inventory operation: it never uploads the raw files.
-Old locations remain visible with their last update time after a copy is moved.
-Set `ZEPHYR_SITE` to a stable cluster or filesystem name if the hostname is too
-specific; `SLURM_CLUSTER_NAME` is used automatically when available.
+several copies with the same HASH. A normal sync counts numbered BoxLib `cell`
+and `node` directories as opaque data trees without entering them. It records
+the absolute path, site/host, number of files outside those trees, data-tree
+count and types, and a shallow path fingerprint. The UI labels this as an
+indexed-file count rather than an exact total. The cache at
+`~/.config/zephyr/sync-cache.json` skips unchanged directory reads. Use
+`zph sync --deep PATH` to recompute an exact all-file count, total bytes, and a
+size/mtime fingerprint. This is an inventory operation: it never uploads the
+raw files. Old locations remain visible with their last update time after a
+copy is moved. Set `ZEPHYR_SITE` to a stable cluster or filesystem name if the
+hostname is too specific; `SLURM_CLUSTER_NAME` is used automatically when
+available.
 
 `zph put` looks for `metadata` beside each target file. Thus
 `zph put output/myfile.png` automatically selects the run described by

@@ -220,6 +220,8 @@ class RunCopy(TimestampMixin, Base):
     path: Mapped[str] = mapped_column(String(2000))
     platform: Mapped[str | None] = mapped_column(String(255))
     file_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    file_count_complete: Mapped[bool] = mapped_column(Boolean, default=True)
+    data_tree_count: Mapped[int] = mapped_column(BigInteger, default=0)
     total_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     has_cell_data: Mapped[bool] = mapped_column(Boolean, default=False)
     has_node_data: Mapped[bool] = mapped_column(Boolean, default=False)

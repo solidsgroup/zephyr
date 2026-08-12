@@ -85,6 +85,8 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert first_copy.status_code == 200
             assert first_copy.json()["file_count"] == 1250
+            assert first_copy.json()["file_count_complete"] is True
+            assert first_copy.json()["data_tree_count"] == 0
             copy_id = first_copy.json()["id"]
 
             refreshed_copy = await client.put(
@@ -144,7 +146,9 @@ async def test_run_lifecycle_and_public_project() -> None:
                             "host": "login2",
                             "path": "/scratch/brunnels/output.481516",
                             "platform": "Linux",
-                            "file_count": 1260,
+                            "file_count": 12,
+                            "file_count_complete": False,
+                            "data_tree_count": 1248,
                             "total_size_bytes": None,
                             "has_cell_data": True,
                             "has_node_data": True,
@@ -158,6 +162,8 @@ async def test_run_lifecycle_and_public_project() -> None:
                             "path": "/home/user/output.481516",
                             "platform": "Linux",
                             "file_count": 4,
+                            "file_count_complete": True,
+                            "data_tree_count": 0,
                             "total_size_bytes": None,
                             "has_cell_data": False,
                             "has_node_data": False,
@@ -173,6 +179,11 @@ async def test_run_lifecycle_and_public_project() -> None:
             copies = await client.get(f"/api/v1/runs/{run_id}/copies")
             assert len(copies.json()) == 2
             assert {copy["total_size_bytes"] for copy in copies.json()} == {None}
+            shallow_copy = next(
+                copy for copy in copies.json() if copy["site"] == "stampede3"
+            )
+            assert shallow_copy["file_count_complete"] is False
+            assert shallow_copy["data_tree_count"] == 1248
 
             # Recreate a legacy row that retained metadata but not scheduler columns.
             async with SessionLocal() as db:

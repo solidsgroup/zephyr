@@ -15,7 +15,10 @@ def write_copy(directory: Path, alamo_hash: str) -> None:
     )
 
 
-def test_fast_directory_inventory_counts_files_and_boxlib_data(tmp_path: Path) -> None:
+def test_shallow_directory_inventory_counts_but_does_not_enter_boxlib_data(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     write_copy(tmp_path, "hash-one")
     cell = tmp_path / "00000cell" / "Level_0"
     node = tmp_path / "00100node" / "Level_0"
@@ -24,15 +27,29 @@ def test_fast_directory_inventory_counts_files_and_boxlib_data(tmp_path: Path) -
     (cell / "Cell_D_00000").write_bytes(b"cell-data")
     (node / "Node_D_00000").write_bytes(b"node-data")
 
+    scanned: list[Path] = []
+    original_scandir = main.os.scandir
+
+    def recording_scandir(path: object):
+        scanned.append(Path(path))
+        return original_scandir(path)
+
+    monkeypatch.setattr(main.os, "scandir", recording_scandir)
     inventory = main.directory_inventory(tmp_path)
 
-    assert inventory.file_count == 3
+    assert inventory.file_count == 1
+    assert inventory.file_count_complete is False
+    assert inventory.data_tree_count == 2
     assert inventory.total_size_bytes is None
     assert inventory.has_cell_data is True
     assert inventory.has_node_data is True
+    assert cell not in scanned
+    assert node not in scanned
 
     deep = main.directory_inventory(tmp_path, deep=True)
     assert deep.file_count == 3
+    assert deep.file_count_complete is True
+    assert deep.data_tree_count == 2
     assert deep.total_size_bytes is not None
     assert deep.total_size_bytes > 0
 
@@ -77,7 +94,7 @@ def test_cached_inventory_reuses_unchanged_directory_tree(
     nested = tmp_path / "00000cell" / "Level_0"
     nested.mkdir(parents=True)
     (nested / "Cell_D_00000").write_bytes(b"cell-data")
-    cache: dict[str, Any] = {"version": 1, "paths": {}}
+    cache: dict[str, Any] = {"version": 2, "paths": {}}
 
     first, first_hit = main.cached_directory_inventory(tmp_path, cache)
     monkeypatch.setattr(
@@ -147,6 +164,8 @@ def test_sync_records_every_copy_even_when_hashes_repeat(
         if isinstance(payload, dict) and payload["path"] == str(first.resolve())
     )
     assert first_payload["has_cell_data"] is True
+    assert first_payload["file_count_complete"] is False
+    assert first_payload["data_tree_count"] == 1
 
 
 def test_sync_parser_defaults_to_current_directory() -> None:

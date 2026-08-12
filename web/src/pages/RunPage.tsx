@@ -183,8 +183,8 @@ export function CopyLocations({ copies }: { copies: RunCopy[] }) {
           <div className="copy-site"><strong>{copy.site}</strong>{copy.host !== copy.site && <small>{copy.host}</small>}</div>
           <div className="copy-path"><code title={copy.path}>{copy.path}</code><CopyButton value={copy.path} label="path" compact /></div>
           <div className="copy-contents">
-            <strong>{copy.file_count.toLocaleString()} files</strong>
-            <small>{copy.total_size_bytes === null ? "Fast inventory" : formatBytes(copy.total_size_bytes)}</small>
+            <strong>{copy.file_count.toLocaleString()} {copy.file_count_complete ? "files" : "indexed files"}</strong>
+            <small>{copy.data_tree_count ? `${copy.data_tree_count.toLocaleString()} BoxLib trees · ` : ""}{copy.total_size_bytes === null ? "Shallow inventory" : formatBytes(copy.total_size_bytes)}</small>
             {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Simulation data</span>}
             {copy.has_cell_data && <span className="copy-data-badge">cell</span>}
             {copy.has_node_data && <span className="copy-data-badge">node</span>}

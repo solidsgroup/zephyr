@@ -105,6 +105,8 @@ ANSI_CYAN = "\033[36m"
 @dataclass(frozen=True)
 class DirectoryInventory:
     file_count: int
+    file_count_complete: bool
+    data_tree_count: int
     total_size_bytes: int | None
     has_cell_data: bool
     has_node_data: bool
@@ -515,6 +517,7 @@ def directory_inventory(directory: Path, *, deep: bool = False) -> DirectoryInve
         raise WorkspaceError(f"Cannot inventory {root}: not a directory")
 
     file_count = 0
+    data_tree_count = 0
     total_size_bytes = 0
     has_cell_data = False
     has_node_data = False
@@ -522,15 +525,16 @@ def directory_inventory(directory: Path, *, deep: bool = False) -> DirectoryInve
     deep_manifest = hashlib.sha256() if deep else None
     directory_stamps: dict[str, tuple[int, int, int]] = {}
 
-    def update_data_flags(name: str) -> None:
+    def update_data_flags(name: str) -> bool:
         nonlocal has_cell_data, has_node_data
         if not BOX_LIB_DATA_TREE.fullmatch(name):
-            return
+            return False
         lowered = name.lower()
         if lowered.endswith("cell"):
             has_cell_data = True
         if lowered.endswith("node"):
             has_node_data = True
+        return True
 
     def record_path(kind: bytes, relative: str) -> None:
         encoded = relative.encode("utf-8", errors="surrogateescape")
@@ -544,7 +548,7 @@ def directory_inventory(directory: Path, *, deep: bool = False) -> DirectoryInve
             deep_manifest.update(encoded)
 
     def scan(current: str, relative_directory: str, details: os.stat_result) -> None:
-        nonlocal file_count, total_size_bytes
+        nonlocal data_tree_count, file_count, total_size_bytes
         directory_stamps[relative_directory] = (
             details.st_mtime_ns,
             details.st_ctime_ns,
@@ -562,11 +566,15 @@ def directory_inventory(directory: Path, *, deep: bool = False) -> DirectoryInve
                 if entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
-                    child_details = entry.stat(follow_symlinks=False)
-                    update_data_flags(entry.name)
+                    is_data_tree = update_data_flags(entry.name)
+                    if is_data_tree:
+                        data_tree_count += 1
                     record_path(b"directory", relative)
                     if deep_manifest is not None:
                         deep_manifest.update(b"\n")
+                    if is_data_tree and not deep:
+                        continue
+                    child_details = entry.stat(follow_symlinks=False)
                     scan(entry.path, relative, child_details)
                     continue
                 if not entry.is_file(follow_symlinks=False):
@@ -594,6 +602,8 @@ def directory_inventory(directory: Path, *, deep: bool = False) -> DirectoryInve
     path_digest = path_manifest.hexdigest()
     return DirectoryInventory(
         file_count=file_count,
+        file_count_complete=deep or data_tree_count == 0,
+        data_tree_count=data_tree_count,
         total_size_bytes=total_size_bytes if deep else None,
         has_cell_data=has_cell_data,
         has_node_data=has_node_data,
@@ -630,6 +640,8 @@ def cached_directory_inventory(
                     raise ValueError
             inventory = DirectoryInventory(
                 file_count=int(record["file_count"]),
+                file_count_complete=bool(record["file_count_complete"]),
+                data_tree_count=int(record["data_tree_count"]),
                 total_size_bytes=None,
                 has_cell_data=bool(record["has_cell_data"]),
                 has_node_data=bool(record["has_node_data"]),
@@ -648,6 +660,8 @@ def cached_directory_inventory(
     inventory = directory_inventory(root, deep=deep)
     paths[str(root)] = {
         "file_count": inventory.file_count,
+        "file_count_complete": inventory.file_count_complete,
+        "data_tree_count": inventory.data_tree_count,
         "has_cell_data": inventory.has_cell_data,
         "has_node_data": inventory.has_node_data,
         "path_digest": inventory.path_digest,
@@ -676,6 +690,8 @@ def copy_location_payload(
         "path": str(root),
         "platform": platform.platform(),
         "file_count": inventory.file_count,
+        "file_count_complete": inventory.file_count_complete,
+        "data_tree_count": inventory.data_tree_count,
         "total_size_bytes": inventory.total_size_bytes,
         "has_cell_data": inventory.has_cell_data,
         "has_node_data": inventory.has_node_data,
@@ -1110,7 +1126,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
         )
     else:
         print(
-            "  Mode   Fast inventory: filenames and directory changes; BoxLib trees included.",
+            "  Mode   Shallow inventory: BoxLib data trees are counted but not entered.",
             flush=True,
         )
     client = configured_client()
@@ -1175,7 +1191,10 @@ def cmd_sync(args: argparse.Namespace) -> None:
         batch_update_copy_locations(client, updates)
 
     for directory, alamo_hash, inventory, cache_hit in prepared:
-        details = [f"{inventory.file_count:,} files"]
+        file_label = "files" if inventory.file_count_complete else "indexed files"
+        details = [f"{inventory.file_count:,} {file_label}"]
+        if inventory.data_tree_count:
+            details.append(f"{inventory.data_tree_count:,} BoxLib trees")
         if inventory.total_size_bytes is not None:
             details.append(format_file_size(inventory.total_size_bytes))
         details.extend(
@@ -1916,8 +1935,8 @@ def parser() -> argparse.ArgumentParser:
         help="recursively refresh local copy locations and file inventories",
         description=(
             "Find every Alamo metadata directory beneath PATH and refresh its local "
-            "copy location, file count, path fingerprint, and BoxLib data flags. "
-            "Use --deep to also inventory sizes and modification times."
+            "copy location and shallow inventory without entering BoxLib data trees. "
+            "Use --deep for exact file counts, sizes, and modification times."
         ),
     )
     sync.add_argument(

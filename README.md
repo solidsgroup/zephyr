@@ -82,17 +82,18 @@ source/vendor trees, virtual environments, VCS data, and package caches. Bulk
 registration uses a single catalog lookup and up to four concurrent syncs.
 
 `zph sync PATH...` recursively discovers every Alamo copy beneath the supplied
-paths, including multiple directories with the same HASH. Unlike the fast
-discovery pass used by `zph add`, it inventories filenames throughout each run,
-including BoxLib trees. The default scan avoids per-file stat calls and reuses
-an incremental cache in `~/.config/zephyr/sync-cache.json` when directory
-timestamps show that filenames have not changed. Zephyr records the absolute
-path, storage site and host, file count, a path fingerprint, and whether numbered
-`cell` or `node` data is present. It does not upload the raw dataset. Use
-`zph sync --deep PATH` when a full byte total and size/mtime fingerprint are
-needed. Moving a copy creates a new known location; the previous location is
-retained with its last update time. Set `ZEPHYR_SITE` to give shared cluster
-storage a stable name when `SLURM_CLUSTER_NAME` is unavailable.
+paths, including multiple directories with the same HASH. Normal sync treats
+numbered BoxLib `cell` and `node` directories as opaque data trees: it records
+their names, counts, and types without entering their metadata-heavy contents.
+The displayed file count is therefore labeled as an indexed-file count whenever
+data trees were skipped. An incremental cache in
+`~/.config/zephyr/sync-cache.json` avoids reopening unchanged directories.
+Zephyr also records the absolute path, storage site and host, and a shallow path
+fingerprint. It does not upload the raw dataset. Use `zph sync --deep PATH` when
+an exact all-file count, byte total, and size/mtime fingerprint are needed.
+Moving a copy creates a new known location; the previous location is retained
+with its last update time. Set `ZEPHYR_SITE` to give shared cluster storage a
+stable name when `SLURM_CLUSTER_NAME` is unavailable.
 
 Upload and restore results:
 

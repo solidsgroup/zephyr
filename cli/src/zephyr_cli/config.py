@@ -62,13 +62,13 @@ def sync_cache_path() -> Path:
 def load_sync_cache() -> dict[str, Any]:
     path = sync_cache_path()
     if not path.exists():
-        return {"version": 1, "paths": {}}
+        return {"version": 2, "paths": {}}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"version": 1, "paths": {}}
-    if data.get("version") != 1 or not isinstance(data.get("paths"), dict):
-        return {"version": 1, "paths": {}}
+        return {"version": 2, "paths": {}}
+    if data.get("version") != 2 or not isinstance(data.get("paths"), dict):
+        return {"version": 2, "paths": {}}
     return data
 
 

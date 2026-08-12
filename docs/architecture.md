@@ -38,12 +38,14 @@ idempotent.
 Copy locations are append-preserving catalog records keyed by run, storage
 site, and absolute path. `zph get`, `zph put`, and `zph sync` refresh a record's
 last update time and local inventory. Normal syncs use a path-only digest and a
-user-level directory timestamp cache to avoid per-file metadata calls. An
-explicit deep sync additionally records total size and fingerprints file sizes
-and mtimes. Copy-location updates are committed through a bulk endpoint without
-placing the file manifest or raw BoxLib data in Zephyr. Moving a directory
-therefore records its new location without silently erasing the last-known
-location of the old copy.
+user-level directory timestamp cache to avoid per-file metadata calls. Numbered
+BoxLib trees are opaque in this mode, so the record distinguishes indexed files
+from the number and types of skipped data trees. An explicit deep sync enters
+those trees, records an exact file count and total size, and fingerprints file
+sizes and mtimes. Copy-location updates are committed through a bulk endpoint
+without placing the file manifest or raw BoxLib data in Zephyr. Moving a
+directory therefore records its new location without silently erasing the
+last-known location of the old copy.
 
 ## Security boundary
 
