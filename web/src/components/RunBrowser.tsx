@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "../api";
@@ -59,6 +59,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [site, setSite] = useState("");
   const [thumbnail, setThumbnail] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const selectionAnchor = useRef<string | null>(null);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [projectNotice, setProjectNotice] = useState("");
@@ -91,7 +92,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   });
   const data = runs.data ?? [];
   const sites = facets.data?.sites ?? [];
-  const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+  const selectedIds = data.filter((run) => selected[run.id]).map((run) => run.id);
   const projects = useQuery({
     queryKey: ["projects", "editable"],
     queryFn: () => api<Project[]>("/projects?editable=true"),
@@ -112,8 +113,28 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   });
 
   function chooseRun(event: MouseEvent<HTMLAnchorElement>, run: Run) {
-    if (event.ctrlKey || event.metaKey) {
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
       event.preventDefault();
+      event.stopPropagation();
+    }
+    if (event.shiftKey) {
+      const anchorId = selectionAnchor.current ?? selectedIds.at(-1) ?? run.id;
+      const anchorIndex = data.findIndex((item) => item.id === anchorId);
+      const runIndex = data.findIndex((item) => item.id === run.id);
+      if (anchorIndex >= 0 && runIndex >= 0) {
+        const first = Math.min(anchorIndex, runIndex);
+        const last = Math.max(anchorIndex, runIndex);
+        const range = data.slice(first, last + 1);
+        setSelected((current) => {
+          const next = event.ctrlKey || event.metaKey ? { ...current } : {};
+          for (const item of range) next[item.id] = true;
+          return next;
+        });
+      }
+      return;
+    }
+    selectionAnchor.current = run.id;
+    if (event.ctrlKey || event.metaKey) {
       setSelected((current) => ({ ...current, [run.id]: !current[run.id] }));
       return;
     }
@@ -204,7 +225,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
             <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length}</button>
           </div>
         </> :
-          <span>{selectedIds.length === 1 ? "Ctrl/Cmd-click another run to compare" : "Ctrl/Cmd-click to select multiple runs"}</span>}
+          <span>{selectedIds.length === 1 ? "Shift-click a range or Ctrl/Cmd-click another run" : "Shift-click a range · Ctrl/Cmd-click individual runs"}</span>}
       </footer>
     </aside>
   );

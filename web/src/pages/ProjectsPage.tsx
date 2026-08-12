@@ -1,11 +1,10 @@
-import { useMemo, useState, type CSSProperties, type DragEvent } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api, currentUser } from "../api";
-import { isVideoContentType, isVisualContentType } from "../artifacts";
-import LazyVideo from "../components/LazyVideo";
 import { ArtifactStack } from "../components/RunBrowser";
 import StatusPill from "../components/StatusPill";
+import { RunRecord } from "./RunPage";
 import type {
   Project,
   ProjectFolder,
@@ -34,6 +33,7 @@ function FolderIcon({ open }: { open: boolean }) {
 
 function ProjectRunRow({
   placement,
+  active,
   selected,
   canEdit,
   dragging,
@@ -42,10 +42,11 @@ function ProjectRunRow({
   onDragEnd,
 }: {
   placement: ProjectRunPlacement;
+  active: boolean;
   selected: boolean;
   canEdit: boolean;
   dragging: boolean;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
   onDragEnd: () => void;
 }) {
@@ -53,6 +54,7 @@ function ProjectRunRow({
   return (
     <button
       className="project-run-row"
+      data-active={active}
       data-selected={selected}
       data-dragging={dragging}
       draggable={canEdit}
@@ -77,7 +79,8 @@ function FolderNode({
   childFolders,
   runsByFolder,
   collapsed,
-  selectedRunId,
+  activeRunId,
+  selectedRunIds,
   draggedRunId,
   dropTarget,
   canEdit,
@@ -94,12 +97,13 @@ function FolderNode({
   childFolders: Map<string, ProjectFolder[]>;
   runsByFolder: Map<string, ProjectRunPlacement[]>;
   collapsed: Set<string>;
-  selectedRunId: string | null;
+  activeRunId: string | null;
+  selectedRunIds: Set<string>;
   draggedRunId: string | null;
   dropTarget: string | null;
   canEdit: boolean;
   onToggle: (id: string) => void;
-  onSelectRun: (id: string) => void;
+  onSelectRun: (event: MouseEvent<HTMLButtonElement>, id: string) => void;
   onStartRunDrag: (event: DragEvent<HTMLButtonElement>, id: string) => void;
   onEndRunDrag: () => void;
   onDragOverFolder: (event: DragEvent, id: string) => void;
@@ -135,7 +139,8 @@ function FolderNode({
               childFolders={childFolders}
               runsByFolder={runsByFolder}
               collapsed={collapsed}
-              selectedRunId={selectedRunId}
+              activeRunId={activeRunId}
+              selectedRunIds={selectedRunIds}
               draggedRunId={draggedRunId}
               dropTarget={dropTarget}
               canEdit={canEdit}
@@ -152,10 +157,11 @@ function FolderNode({
             <ProjectRunRow
               key={placement.run.id}
               placement={placement}
-              selected={selectedRunId === placement.run.id}
+              active={activeRunId === placement.run.id}
+              selected={selectedRunIds.has(placement.run.id)}
               canEdit={canEdit}
               dragging={draggedRunId === placement.run.id}
-              onSelect={() => onSelectRun(placement.run.id)}
+              onSelect={(event) => onSelectRun(event, placement.run.id)}
               onDragStart={(event) => onStartRunDrag(event, placement.run.id)}
               onDragEnd={onEndRunDrag}
             />
@@ -163,35 +169,6 @@ function FolderNode({
           {!children.length && !runs.length && <div className="project-empty-folder">Drop runs here</div>}
         </div>
       )}
-    </div>
-  );
-}
-
-function ProjectRunOverview({ placement }: { placement: ProjectRunPlacement }) {
-  const run = placement.run;
-  return (
-    <div className="project-run-overview">
-      <header>
-        <div className="project-overview-preview"><ArtifactStack run={run} /></div>
-        <div>
-          <p className="eyebrow">SELECTED RUN</p>
-          <h1>{run.name}</h1>
-          <span className="project-run-state"><StatusPill status={run.effective_status} />{run.effective_status}</span>
-        </div>
-        <Link className="button button-primary" href={`/runs/${run.id}`}>Open full record</Link>
-      </header>
-      <div className="project-run-facts">
-        <div><small>Output directory</small><code title={run.output_path ?? ""}>{run.output_path ?? "—"}</code></div>
-        <div><small>Host</small><strong>{run.host ?? "—"}</strong></div>
-        <div><small>SLURM job</small><strong>{run.scheduler_job_id?.replace("SLURM_JOB_ID=", "") ?? "—"}</strong></div>
-        <div><small>Git commit</small><code>{run.git_commit?.slice(0, 12) ?? "—"}</code></div>
-        <div><small>Artifacts</small><strong>{run.artifact_count}</strong></div>
-        <div><small>Updated</small><strong>{new Date(run.updated_at).toLocaleString()}</strong></div>
-      </div>
-      <section className="project-selected-artifacts">
-        <div><div><p className="eyebrow">SIMULATION DATA</p><h2>Recent artifacts</h2></div><Link href={`/runs/${run.id}`}>Browse all {run.artifact_count} ↗</Link></div>
-        {run.artifact_previews.length ? <div className="project-artifact-strip">{run.artifact_previews.map((artifact) => <article key={artifact.id}><div>{artifact.download_url && isVideoContentType(artifact.content_type) ? <LazyVideo src={artifact.download_url} label={artifact.logical_name} /> : artifact.download_url && isVisualContentType(artifact.content_type) ? <img loading="lazy" src={artifact.download_url} alt={artifact.logical_name} /> : <span>◇</span>}</div><strong>{artifact.logical_name}</strong><small>{artifact.path}</small></article>)}</div> : <p className="project-no-artifacts">No artifacts have been uploaded for this run.</p>}
-      </section>
     </div>
   );
 }
@@ -231,6 +208,8 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
   const me = useQuery({ queryKey: ["me"], queryFn: currentUser });
   const layout = useQuery({ queryKey: ["project-layout", project.id], queryFn: ({ signal }) => api<ProjectLayout>(`/projects/${project.id}/layout`, { signal }) });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set());
+  const selectionAnchor = useRef<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [draggedRunId, setDraggedRunId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -299,6 +278,18 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     return result;
   }, [placements]);
   const selectedPlacement = placements.find((placement) => placement.run.id === selectedRunId) ?? placements[0] ?? null;
+  const visibleRunIds = useMemo(() => {
+    const result: string[] = [];
+    const visitFolder = (folder: ProjectFolder) => {
+      if (collapsed.has(folder.id)) return;
+      for (const child of childFolders.get(folder.id) ?? []) visitFolder(child);
+      for (const placement of runsByFolder.get(folder.id) ?? []) result.push(placement.run.id);
+    };
+    for (const folder of childFolders.get(ROOT) ?? []) visitFolder(folder);
+    for (const placement of runsByFolder.get(ROOT) ?? []) result.push(placement.run.id);
+    return result;
+  }, [childFolders, collapsed, runsByFolder]);
+  const selectedIds = placements.filter((placement) => selectedRunIds.has(placement.run.id)).map((placement) => placement.run.id);
   const included = new Set(placements.map((placement) => placement.run.id));
   const candidates = (allRuns.data ?? []).filter((run) => run.owner_id === me.data?.id && !included.has(run.id));
 
@@ -325,6 +316,37 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     setShowNewFolder(true);
     setShowAddRun(false);
   }
+  function selectRun(event: MouseEvent<HTMLButtonElement>, id: string) {
+    event.preventDefault();
+    setSelectedRunId(id);
+    setShowSettings(false);
+    if (event.shiftKey) {
+      const anchorId = selectionAnchor.current ?? selectedPlacement?.run.id ?? id;
+      const anchorIndex = visibleRunIds.indexOf(anchorId);
+      const runIndex = visibleRunIds.indexOf(id);
+      if (anchorIndex >= 0 && runIndex >= 0) {
+        const first = Math.min(anchorIndex, runIndex);
+        const last = Math.max(anchorIndex, runIndex);
+        const range = visibleRunIds.slice(first, last + 1);
+        setSelectedRunIds((current) => {
+          const next = event.ctrlKey || event.metaKey ? new Set(current) : new Set<string>();
+          for (const runId of range) next.add(runId);
+          return next;
+        });
+      }
+      return;
+    }
+    selectionAnchor.current = id;
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedRunIds((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+      return;
+    }
+    setSelectedRunIds(new Set([id]));
+  }
 
   return (
     <div className="project-workspace-shell">
@@ -344,15 +366,18 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
           ><span>Project root</span>{draggedRunId && <small>Drop to move out of a folder</small>}</div>
           {layout.isPending && <div className="project-tree-state"><span className="spinner" />Loading project…</div>}
           {layout.isError && <div className="project-tree-state error-text">Could not load this project.</div>}
-          {(childFolders.get(ROOT) ?? []).map((folder) => <FolderNode key={folder.id} folder={folder} depth={0} childFolders={childFolders} runsByFolder={runsByFolder} collapsed={collapsed} selectedRunId={selectedPlacement?.run.id ?? null} draggedRunId={draggedRunId} dropTarget={dropTarget} canEdit={canEdit} onToggle={(id) => setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })} onSelectRun={(id) => { setSelectedRunId(id); setShowSettings(false); }} onStartRunDrag={startRunDrag} onEndRunDrag={() => { setDraggedRunId(null); setDropTarget(null); }} onDragOverFolder={dragOverFolder} onDropRun={(event, id) => dropRun(event, id)} onNewFolder={beginFolder} />)}
-          {(runsByFolder.get(ROOT) ?? []).map((placement) => <ProjectRunRow key={placement.run.id} placement={placement} selected={selectedPlacement?.run.id === placement.run.id && !showSettings} canEdit={canEdit} dragging={draggedRunId === placement.run.id} onSelect={() => { setSelectedRunId(placement.run.id); setShowSettings(false); }} onDragStart={(event) => startRunDrag(event, placement.run.id)} onDragEnd={() => { setDraggedRunId(null); setDropTarget(null); }} />)}
+          {(childFolders.get(ROOT) ?? []).map((folder) => <FolderNode key={folder.id} folder={folder} depth={0} childFolders={childFolders} runsByFolder={runsByFolder} collapsed={collapsed} activeRunId={showSettings ? null : selectedPlacement?.run.id ?? null} selectedRunIds={selectedRunIds} draggedRunId={draggedRunId} dropTarget={dropTarget} canEdit={canEdit} onToggle={(id) => setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })} onSelectRun={selectRun} onStartRunDrag={startRunDrag} onEndRunDrag={() => { setDraggedRunId(null); setDropTarget(null); }} onDragOverFolder={dragOverFolder} onDropRun={(event, id) => dropRun(event, id)} onNewFolder={beginFolder} />)}
+          {(runsByFolder.get(ROOT) ?? []).map((placement) => <ProjectRunRow key={placement.run.id} placement={placement} active={!showSettings && selectedPlacement?.run.id === placement.run.id} selected={selectedRunIds.has(placement.run.id)} canEdit={canEdit} dragging={draggedRunId === placement.run.id} onSelect={(event) => selectRun(event, placement.run.id)} onDragStart={(event) => startRunDrag(event, placement.run.id)} onDragEnd={() => { setDraggedRunId(null); setDropTarget(null); }} />)}
           {!layout.isPending && !folders.length && !placements.length && <div className="project-tree-empty"><strong>No simulation data yet</strong><span>Add runs, then group them into folders.</span></div>}
         </div>
-        <button className="project-settings-button" data-active={showSettings} onClick={() => setShowSettings(true)}><span>⚙</span><span>Project settings</span></button>
+        <div className="project-sidebar-footer">
+          {selectedIds.length > 1 && <div className="project-selection-summary"><span>{selectedIds.length} selected</span><button onClick={() => setSelectedRunIds(new Set())}>Clear</button><Link href={`/compare?ids=${selectedIds.join(",")}`}>Compare</Link></div>}
+          <button className="project-settings-button" data-active={showSettings} onClick={() => setShowSettings(true)}><span>⚙</span><span>Project settings</span></button>
+        </div>
       </aside>
       <main className="project-data-main">
         <header className="project-data-heading"><div><p className="eyebrow">{project.visibility.toUpperCase()} PROJECT</p><h2>{project.name}</h2><p>{project.description || "Simulation workspace"}</p></div>{project.visibility === "public" && <a href={`/public/${project.slug}`}>Public page ↗</a>}</header>
-        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedPlacement ? <ProjectRunOverview placement={selectedPlacement} /> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
+        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
       </main>
     </div>
   );

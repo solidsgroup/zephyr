@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "wouter";
 import { api } from "../api";
@@ -17,6 +17,20 @@ function formatBytes(bytes: number) {
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   if (bytes < 1024 ** 4) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
+}
+
+function abbreviatedAge(value: string, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} days`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} mo`;
+  return `${Math.floor(days / 365)} yr`;
 }
 
 function ArtifactMedia({ artifact, url, fullscreen = false }: { artifact: Artifact; url: string; fullscreen?: boolean }) {
@@ -98,6 +112,7 @@ function InlineRunTitle({ run }: { run: Run }) {
       setEditing(false);
       queryClient.invalidateQueries({ queryKey: ["run", run.id] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["project-layout"] });
     },
   });
   const save = () => {
@@ -136,6 +151,7 @@ function RunMenu({ run }: { run: Run }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["run", run.id] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["project-layout"] });
     },
   });
   const remove = useMutation({
@@ -190,7 +206,7 @@ export function SlurmDetails({ run }: { run: Run }) {
     <section className="panel slurm-detail-panel">
       <div className="panel-heading"><h2>SLURM</h2></div>
       <table className="slurm-detail-table"><tbody>{visibleRows.map((row) => (
-        <tr key={row.label} data-wide={row.wide || undefined}>
+        <tr key={row.label} data-wide={row.wide || undefined} data-path={row.copy || undefined}>
           <th>{row.label}</th>
           <td>{row.code ? <code title={row.value}>{row.value}</code> : <span>{row.value}</span>}{row.copy && <CopyButton value={row.value} label={row.label.toLowerCase()} />}</td>
         </tr>
@@ -219,20 +235,17 @@ export function CopyLocations({ copies }: { copies: RunCopy[] }) {
           <div className="copy-path"><code title={copy.path}>{copy.path}</code><CopyButton value={copy.path} label="path" compact /></div>
           <div className="copy-contents">
             <strong>{copy.file_count.toLocaleString()} {copy.file_count_complete ? "files" : "indexed files"}</strong>
-            <small>{copy.data_tree_count ? `${copy.data_tree_count.toLocaleString()} BoxLib trees · ` : ""}{copy.total_size_bytes === null ? "Shallow inventory" : formatBytes(copy.total_size_bytes)}</small>
-            {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Simulation data</span>}
-            {copy.has_cell_data && <span className="copy-data-badge">cell</span>}
-            {copy.has_node_data && <span className="copy-data-badge">node</span>}
+            {copy.total_size_bytes !== null && <small>{formatBytes(copy.total_size_bytes)}</small>}
+            {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Data</span>}
           </div>
-          <div className="copy-updated"><strong>{new Date(copy.updated_at).toLocaleString()}</strong><small>via zph {copyAction[copy.last_action]}</small></div>
+          <div className="copy-updated"><strong title={new Date(copy.updated_at).toLocaleString()}>{abbreviatedAge(copy.updated_at)}</strong><small>via zph {copyAction[copy.last_action]}</small></div>
         </article>)}
       </div> : <div className="copy-location-empty">No inventoried copies yet. Run <code>zph sync PATH</code> where a copy is stored.</div>}
     </section>
   );
 }
 
-export default function RunPage() {
-  const { runId = "" } = useParams();
+export function RunRecord({ runId, embedded = false }: { runId: string; embedded?: boolean }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("overview");
   const [viewer, setViewer] = useState<{ artifact: Artifact; url: string } | null>(null);
@@ -247,14 +260,16 @@ export default function RunPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["run", runId] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["project-layout"] });
     },
   });
-  if (detail.isPending) return <div className="center-state"><span className="spinner" />Loading run…</div>;
-  if (detail.isError) return <div className="error-panel">This run could not be loaded.</div>;
+  const frame = (content: ReactNode) => embedded ? <div className="embedded-run-record">{content}</div> : content;
+  if (detail.isPending) return frame(<div className="center-state"><span className="spinner" />Loading run…</div>);
+  if (detail.isError) return frame(<div className="error-panel">This run could not be loaded.</div>);
   const { run, metadata, output, copies = [], thermo } = detail.data;
   const commit = run.git_commit ? commitReference(run.git_commit) : null;
   const repository = run.git_repository_url ?? "https://github.com/solidsgroup/alamo";
-  return (
+  return frame(
     <>
       <header className="run-header">
         <div><p className="eyebrow">RUN DETAIL</p><div className="run-title-row"><InlineRunTitle run={run} /><StatusPill status={run.effective_status} /></div>{run.host && <p>Running on <strong>{run.host}</strong></p>}</div>
@@ -278,6 +293,11 @@ export default function RunPage() {
       {tab === "files" && <section><div className="section-heading"><div><h2>Artifacts</h2><p>Latest version of each posted file. Click an image or video for a fullscreen view.</p></div></div>{selectThumbnail.isError && <p className="form-error">Could not set the run thumbnail.</p>}{latestArtifacts.length ? <div className="artifact-grid">{latestArtifacts.map((artifact) => <ArtifactCard key={artifact.id} runId={run.id} artifact={artifact} isThumbnail={artifact.id === run.thumbnail_artifact_id} selectingThumbnail={selectThumbnail.isPending && selectThumbnail.variables === artifact.id} onSelectThumbnail={() => selectThumbnail.mutate(artifact.id)} onOpen={(url) => setViewer({ artifact, url })} />)}</div> : <div className="empty-panel panel">No artifacts yet. Upload some with <code>zph put '*.png'</code>.</div>}</section>}
       {tab === "metadata" && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Alamo output</p><h2>metadata</h2></div><code>{metadata?.digest.slice(0, 12) ?? "not posted"}</code></div>{metadata ? <><MetadataTable records={[{ name: run.name, values: metadata.values }]} /><details className="raw-metadata"><summary>Raw file</summary><pre>{metadata.raw_text}</pre></details></> : <div className="empty-panel">No metadata file has been posted.</div>}</section>}
       {viewer && <ArtifactViewer artifact={viewer.artifact} url={viewer.url} onClose={() => setViewer(null)} />}
-    </>
+    </>,
   );
+}
+
+export default function RunPage() {
+  const { runId = "" } = useParams();
+  return <RunRecord runId={runId} />;
 }

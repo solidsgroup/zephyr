@@ -9,7 +9,10 @@ import ProjectsPage from "./pages/ProjectsPage";
 import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
 import type { Artifact, Run, RunCopy } from "./types";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 function run(id: string, name: string): Run {
   return {
@@ -97,15 +100,15 @@ describe("ArtifactViewer", () => {
 });
 
 describe("RunBrowser", () => {
-  it("uses Ctrl-click for multi-selection without checkboxes", async () => {
-    const runs = [run("one", "Run one"), run("two", "Run two")];
+  it("uses Ctrl-click and Shift-click for multi-selection without navigating", async () => {
+    const runs = [run("one", "Run one"), run("two", "Run two"), run("three", "Run three")];
     vi.stubGlobal("fetch", vi.fn((request: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify(
       String(request).includes("/runs/facets")
         ? { sites: [{ site: "stampede3", run_count: 2 }] }
         : String(request).includes("/projects?")
           ? [{ id: "project", owner_id: "owner", slug: "study", name: "Study", description: "", visibility: "private" }]
           : String(request).includes("/runs/batch")
-            ? { added: 2, already_present: 0 }
+            ? { added: 3, already_present: 0 }
         : runs,
     ), {
       status: 200,
@@ -113,28 +116,32 @@ describe("RunBrowser", () => {
     }))));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+    const close = vi.fn();
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <RunBrowser open onClose={() => undefined} />
+        <RunBrowser open onClose={close} />
       </QueryClientProvider>,
     );
 
     const browser = within(view.container);
     const first = await browser.findByRole("link", { name: "Run one" });
     const second = browser.getByRole("link", { name: "Run two" });
+    const third = browser.getByRole("link", { name: "Run three" });
     expect(browser.queryByRole("checkbox")).not.toBeInTheDocument();
 
     fireEvent.click(first, { ctrlKey: true });
-    expect(browser.getByText("Ctrl/Cmd-click another run to compare")).toBeInTheDocument();
-    fireEvent.click(second, { ctrlKey: true });
-    expect(browser.getByRole("button", { name: "Compare 2" })).toBeInTheDocument();
+    expect(browser.getByText("Shift-click a range or Ctrl/Cmd-click another run")).toBeInTheDocument();
+    fireEvent.click(third, { shiftKey: true });
+    expect(browser.getByRole("button", { name: "Compare 3" })).toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
     fireEvent.click(browser.getByRole("button", { name: "Add to project" }));
     const project = await browser.findByRole("option", { name: "Study" });
     fireEvent.change(project.closest("select")!, { target: { value: "project" } });
     fireEvent.click(browser.getByRole("button", { name: "Add runs" }));
-    expect(await browser.findByText("Added 2 to Study")).toBeInTheDocument();
+    expect(await browser.findByText("Added 3 to Study")).toBeInTheDocument();
     expect(first.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
     expect(second.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
+    expect(third.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
   });
 
   it("sends path search and storage filters to the server", async () => {
@@ -173,15 +180,18 @@ describe("RunBrowser", () => {
 });
 
 describe("ProjectsPage", () => {
-  it("shows nested folders and moves a run by drag and drop", async () => {
+  it("shows the full record, selects ranges, and moves a run by drag and drop", async () => {
     const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
-    const projectRun = run("simulation", "Simulation one");
+    const projectRun = { ...run("simulation", "Simulation one"), output_path: "/scratch/alamo-runs/results/output.one" };
+    const secondRun = { ...run("simulation-two", "Simulation two"), output_path: "/scratch/alamo-runs/results/output.two" };
+    const thirdRun = { ...run("simulation-three", "Simulation three"), output_path: "/scratch/alamo-runs/results/output.three" };
+    const projectRuns = [projectRun, secondRun, thirdRun];
     const layout = {
       folders: [
         { id: "cases", project_id: "project", parent_id: null, name: "Cases", position: 0 },
         { id: "gpu", project_id: "project", parent_id: "cases", name: "GPU", position: 0 },
       ],
-      runs: [{ run: projectRun, folder_id: null, position: 0 }],
+      runs: projectRuns.map((item, position) => ({ run: item, folder_id: null, position })),
     };
     const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
       const url = String(request);
@@ -194,6 +204,11 @@ describe("ProjectsPage", () => {
         body = layout;
       } else if (url.includes("/projects")) {
         body = [project];
+      } else if (url.includes("/runs/") && url.endsWith("/artifacts")) {
+        body = [];
+      } else if (url.includes("/runs/")) {
+        const id = url.split("/runs/")[1].split("?")[0];
+        body = { run: projectRuns.find((item) => item.id === id), metadata: null, output: null, copies: [], thermo: [] };
       }
       return Promise.resolve(new Response(JSON.stringify(body), { status: options?.method === "DELETE" ? 204 : 200, headers: { "Content-Type": "application/json" } }));
     });
@@ -204,13 +219,22 @@ describe("ProjectsPage", () => {
     const view = render(<QueryClientProvider client={queryClient}><ProjectsPage /></QueryClientProvider>);
     const page = within(view.container);
     expect(await page.findByRole("combobox", { name: "Select project" })).toHaveValue("project");
+    expect(await page.findByRole("button", { name: "stdout" })).toBeInTheDocument();
+    expect(page.getByRole("button", { name: "git diff" })).toBeInTheDocument();
     const casesButton = (await page.findByText("Cases")).closest("button")!;
     expect(page.getByText("GPU")).toBeInTheDocument();
     fireEvent.click(casesButton);
     expect(page.queryByText("GPU")).not.toBeInTheDocument();
     fireEvent.click(casesButton);
 
-    const runButton = page.getAllByText("Simulation one")[0].closest("button")!;
+    const runRows = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".project-run-row"));
+    fireEvent.click(runRows[0]);
+    fireEvent.click(runRows[2], { shiftKey: true });
+    expect(runRows).toHaveLength(3);
+    expect(runRows.every((row) => row.dataset.selected === "true")).toBe(true);
+    expect(page.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "/compare?ids=simulation,simulation-two,simulation-three");
+
+    const runButton = runRows[0];
     const gpuDropTarget = page.getByText("GPU").closest(".project-folder-row")!;
     const transfer = { effectAllowed: "none", dropEffect: "none", setData: vi.fn(), getData: vi.fn(() => "simulation") };
     fireEvent.dragStart(runButton, { dataTransfer: transfer });
@@ -339,6 +363,8 @@ describe("SlurmDetails", () => {
 
 describe("CopyLocations", () => {
   it("shows file counts, storage paths, and simulation data markers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T15:00:00Z"));
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     const copy = {
@@ -360,16 +386,15 @@ describe("CopyLocations", () => {
       updated_at: "2026-08-12T13:00:00Z",
     } satisfies RunCopy;
 
-    render(<CopyLocations copies={[copy]} />);
-    const panel = screen.getByRole("heading", { name: "Copies" }).closest("section")!;
+    const view = render(<CopyLocations copies={[copy]} />);
+    const panel = within(view.container).getByRole("heading", { name: "Copies" }).closest("section")!;
     const locations = within(panel);
 
     expect(locations.getByText("1 known location")).toBeInTheDocument();
     expect(locations.getByText("12 indexed files")).toBeInTheDocument();
-    expect(locations.getByText("1,248 BoxLib trees · Shallow inventory")).toBeInTheDocument();
-    expect(locations.getByText("Simulation data")).toBeInTheDocument();
-    expect(locations.getByText("cell")).toBeInTheDocument();
-    expect(locations.getByText("node")).toBeInTheDocument();
+    expect(locations.getByText("Data")).toBeInTheDocument();
+    expect(locations.getByText("2 hr")).toBeInTheDocument();
+    expect(locations.queryByText(/BoxLib trees|Shallow inventory|Simulation data|cell|node/i)).not.toBeInTheDocument();
     fireEvent.click(locations.getByRole("button", { name: "Copy path" }));
     expect(writeText).toHaveBeenCalledWith("/scratch/brunnels/output.481516");
   });
