@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
@@ -71,10 +71,14 @@ describe("ArtifactStack", () => {
 describe("RunBrowser", () => {
   it("uses Ctrl-click for multi-selection without checkboxes", async () => {
     const runs = [run("one", "Run one"), run("two", "Run two")];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(runs), {
+    vi.stubGlobal("fetch", vi.fn((request: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify(
+      String(request).includes("/runs/facets")
+        ? { sites: [{ site: "stampede3", run_count: 2 }] }
+        : runs,
+    ), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })));
+    }))));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     render(
@@ -93,6 +97,40 @@ describe("RunBrowser", () => {
     expect(screen.getByRole("button", { name: "Compare 2 runs" })).toBeInTheDocument();
     expect(first.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
     expect(second.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
+  });
+
+  it("sends path search and storage filters to the server", async () => {
+    const fetchMock = vi.fn((request: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify(
+      String(request).includes("/runs/facets")
+        ? { sites: [{ site: "stampede3", run_count: 4 }] }
+        : [run("one", "Run one")],
+    ), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <RunBrowser open onClose={() => undefined} />
+      </QueryClientProvider>,
+    );
+
+    const browser = within(view.container);
+    await browser.findByRole("option", { name: "stampede3 (4)" });
+    fireEvent.change(browser.getByLabelText("Search runs"), { target: { value: ".gif" } });
+    fireEvent.change(browser.getByLabelText("Filter storage site"), { target: { value: "stampede3" } });
+    fireEvent.change(browser.getByLabelText("Filter thumbnail"), { target: { value: "true" } });
+
+    await waitFor(() => {
+      const requestedUrls = fetchMock.mock.calls.map(([request]) => String(request));
+      expect(requestedUrls.some((url) =>
+        url.includes("search=.gif")
+        && url.includes("site=stampede3")
+        && url.includes("has_thumbnail=true"),
+      )).toBe(true);
+    });
   });
 });
 

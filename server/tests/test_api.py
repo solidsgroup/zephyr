@@ -185,6 +185,18 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert shallow_copy["file_count_complete"] is False
             assert shallow_copy["data_tree_count"] == 1248
 
+            searched_copy_path = await client.get(
+                "/api/v1/runs", params={"search": "/home/user/output.481516"}
+            )
+            assert run_id in {run["id"] for run in searched_copy_path.json()}
+            filtered_site = await client.get("/api/v1/runs", params={"site": "stampede3"})
+            assert run_id in {run["id"] for run in filtered_site.json()}
+            facets = await client.get("/api/v1/runs/facets")
+            assert facets.status_code == 200
+            site_counts = {item["site"]: item["run_count"] for item in facets.json()["sites"]}
+            assert site_counts["stampede3"] >= 1
+            assert site_counts["workstation"] >= 1
+
             # Recreate a legacy row that retained metadata but not scheduler columns.
             async with SessionLocal() as db:
                 legacy_run = await db.get(Run, uuid.UUID(run_id))

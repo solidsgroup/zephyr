@@ -38,9 +38,11 @@ from ..schemas import (
     RunCopyRead,
     RunCopyWrite,
     RunCreate,
+    RunFacets,
     RunOutputRead,
     RunOutputWrite,
     RunRead,
+    RunSiteFacet,
     RunSyncState,
     RunSyncStateRequest,
     RunUpdate,
@@ -222,6 +224,8 @@ async def get_accessible_run(db: AsyncSession, user: User, run_id: uuid.UUID) ->
 async def list_runs(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = None,
+    has_thumbnail: bool | None = None,
+    site: str | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
     include_scheduler_metadata: bool = False,
     user: User = Depends(current_user),
@@ -229,15 +233,73 @@ async def list_runs(
 ):
     query = select(Run).where(or_(Run.owner_id == user.id, Run.id.in_(accessible_run_ids(user))))
     if status_filter:
-        query = query.where(Run.status == status_filter)
+        stale_before = utcnow() - timedelta(minutes=2)
+        stale_heartbeat = and_(
+            Run.status.in_({"starting", "running"}),
+            Run.last_heartbeat.is_not(None),
+            Run.last_heartbeat < stale_before,
+        )
+        if status_filter == "unreachable":
+            query = query.where(or_(Run.status == "unreachable", stale_heartbeat))
+        elif status_filter in {"starting", "running"}:
+            query = query.where(
+                Run.status == status_filter,
+                or_(Run.last_heartbeat.is_(None), Run.last_heartbeat >= stale_before),
+            )
+        else:
+            query = query.where(Run.status == status_filter)
     if search:
         escaped = search.replace("%", r"\%").replace("_", r"\_")
+        pattern = f"%{escaped}%"
+        copy_match = (
+            select(RunCopy.id)
+            .where(
+                RunCopy.run_id == Run.id,
+                or_(
+                    RunCopy.path.ilike(pattern, escape="\\"),
+                    RunCopy.site.ilike(pattern, escape="\\"),
+                    RunCopy.host.ilike(pattern, escape="\\"),
+                ),
+            )
+            .correlate(Run)
+            .exists()
+        )
+        artifact_match = (
+            select(RunArtifact.id)
+            .where(
+                RunArtifact.run_id == Run.id,
+                or_(
+                    RunArtifact.path.ilike(pattern, escape="\\"),
+                    RunArtifact.logical_name.ilike(pattern, escape="\\"),
+                ),
+            )
+            .correlate(Run)
+            .exists()
+        )
         query = query.where(
             or_(
-                Run.name.ilike(f"%{escaped}%"),
-                Run.alamo_hash.ilike(f"%{escaped}%"),
-                Run.output_path.ilike(f"%{escaped}%"),
+                Run.name.ilike(pattern, escape="\\"),
+                Run.alamo_hash.ilike(pattern, escape="\\"),
+                Run.output_path.ilike(pattern, escape="\\"),
+                Run.host.ilike(pattern, escape="\\"),
+                Run.scheduler_job_id.ilike(pattern, escape="\\"),
+                Run.git_commit.ilike(pattern, escape="\\"),
+                copy_match,
+                artifact_match,
             )
+        )
+    if has_thumbnail is not None:
+        query = query.where(
+            Run.thumbnail_artifact_id.is_not(None)
+            if has_thumbnail
+            else Run.thumbnail_artifact_id.is_(None)
+        )
+    if site:
+        query = query.where(
+            select(RunCopy.id)
+            .where(RunCopy.run_id == Run.id, RunCopy.site == site)
+            .correlate(Run)
+            .exists()
         )
     runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)
@@ -266,6 +328,26 @@ async def list_runs(
         )
         for run in runs
     ]
+
+
+@router.get("/facets", response_model=RunFacets)
+async def run_facets(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RunFacets:
+    accessible = or_(Run.owner_id == user.id, Run.id.in_(accessible_run_ids(user)))
+    rows = (
+        await db.execute(
+            select(RunCopy.site, func.count(func.distinct(RunCopy.run_id)))
+            .join(Run, Run.id == RunCopy.run_id)
+            .where(accessible)
+            .group_by(RunCopy.site)
+            .order_by(RunCopy.site)
+        )
+    ).all()
+    return RunFacets(
+        sites=[RunSiteFacet(site=site_name, run_count=run_count) for site_name, run_count in rows]
+    )
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)

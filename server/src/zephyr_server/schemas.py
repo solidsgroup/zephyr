@@ -130,6 +130,15 @@ class RunRead(BaseModel):
     updated_at: datetime
 
 
+class RunSiteFacet(BaseModel):
+    site: str
+    run_count: int
+
+
+class RunFacets(BaseModel):
+    sites: list[RunSiteFacet]
+
+
 class Heartbeat(BaseModel):
     sequence: int = Field(ge=0)
     status: RunStatus = "running"

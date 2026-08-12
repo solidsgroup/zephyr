@@ -30,7 +30,7 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 records: list[RunArtifact] = []
                 for index, (name, kind, content_type) in enumerate(
                     [
-                        ("pressure.png", "image", "image/png"),
+                        ("pressure.gif", "image", "image/gif"),
                         ("temperature.png", "image", "image/png"),
                         ("solver.log", "log", "text/plain"),
                         ("temperature.png", "image", "image/png"),
@@ -61,6 +61,11 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 log_id = str(records[2].id)
                 latest_temperature_id = str(records[3].id)
 
+            searched = await client.get("/api/v1/runs", params={"search": ".gif"})
+            assert str(run_id) in {run["id"] for run in searched.json()}
+            without_thumbnail = await client.get("/api/v1/runs", params={"has_thumbnail": "false"})
+            assert str(run_id) in {run["id"] for run in without_thumbnail.json()}
+
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))
             assert listed["artifact_count"] == 3
@@ -80,6 +85,11 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
             )
             assert selected.status_code == 200
             assert selected.json()["thumbnail_artifact_id"] == selected_id
+
+            with_thumbnail = await client.get("/api/v1/runs", params={"has_thumbnail": "true"})
+            assert str(run_id) in {run["id"] for run in with_thumbnail.json()}
+            without_thumbnail = await client.get("/api/v1/runs", params={"has_thumbnail": "false"})
+            assert str(run_id) not in {run["id"] for run in without_thumbnail.json()}
 
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))

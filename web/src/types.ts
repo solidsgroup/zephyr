@@ -34,6 +34,10 @@ export interface Run {
   updated_at: string;
 }
 
+export interface RunFacets {
+  sites: Array<{ site: string; run_count: number }>;
+}
+
 export interface ArtifactPreview {
   id: string;
   logical_name: string;

@@ -54,7 +54,8 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-browser-actions button:hover { color: #175cd3; background: #edf4ff; }
 .run-browser-actions button.refreshing { animation: spin .8s linear infinite; }
 .run-browser-close { display: none !important; }
-.run-browser-filters { display: grid; grid-template-columns: minmax(0, 1fr) 108px; gap: 7px; padding: 0 14px 13px; border-bottom: 1px solid #e7ebf1; }
+.run-browser-filters { display: flex; flex-direction: column; gap: 7px; padding: 0 14px 13px; border-bottom: 1px solid #e7ebf1; }
+.run-filter-row { display: grid; grid-template-columns: .95fr 1.05fr 1fr; gap: 6px; min-width: 0; }
 .run-search { position: relative; min-width: 0; }
 .run-search span { position: absolute; left: 10px; top: 6px; color: #98a2b3; font-size: 18px; }
 .run-search input, .run-browser-filters select { width: 100%; height: 34px; border: 1px solid #d8dee7; border-radius: 7px; padding: 6px 8px; background: white; color: #344054; font-size: 11px; outline: none; }
@@ -377,7 +378,6 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 
 @media (max-width: 1000px) {
   .shell.runs-layout { grid-template-columns: 64px 284px minmax(0, 1fr); }
-  .run-browser-filters { grid-template-columns: 1fr; }
   .run-browser-item > a { grid-template-columns: 58px minmax(0, 1fr); }
   .run-artifact-slot { width: 58px; overflow: hidden; }
   .content { padding: 34px 28px 60px; }
@@ -395,7 +395,6 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
   .run-browser { display: flex; position: fixed; z-index: 25; inset: 0 auto 0 56px; width: min(320px, calc(100vw - 56px)); height: 100vh; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 8px 0 28px #10182838; }
   .run-browser[data-open="true"] { transform: translateX(0); }
   .run-browser-close { display: grid !important; }
-  .run-browser-filters { grid-template-columns: minmax(0, 1fr) 108px; }
   .run-browser-item > a { grid-template-columns: 66px minmax(0, 1fr); }
   .run-artifact-slot { width: 66px; overflow: visible; }
   .runs-layout .content { grid-column: 2; }

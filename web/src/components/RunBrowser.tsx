@@ -1,8 +1,8 @@
-import { useMemo, useState, type CSSProperties, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "../api";
-import type { Run } from "../types";
+import type { Run, RunFacets } from "../types";
 import StatusPill from "./StatusPill";
 
 function age(value: string | null) {
@@ -47,17 +47,36 @@ export function ArtifactStack({ run }: { run: Run }) {
 export default function RunBrowser({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [location, navigate] = useLocation();
   const [search, setSearch] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [site, setSite] = useState("");
+  const [thumbnail, setThumbnail] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const runsPath = useMemo(() => {
+    const query = new URLSearchParams();
+    if (searchQuery) query.set("search", searchQuery);
+    if (status) query.set("status", status);
+    if (site) query.set("site", site);
+    if (thumbnail) query.set("has_thumbnail", thumbnail);
+    const suffix = query.toString();
+    return `/runs${suffix ? `?${suffix}` : ""}`;
+  }, [searchQuery, site, status, thumbnail]);
   const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => api<Run[]>("/runs"),
+    queryKey: ["runs", "browser", searchQuery, status, site, thumbnail],
+    queryFn: () => api<Run[]>(runsPath),
     refetchInterval: 15_000,
   });
-  const data = useMemo(() => (runs.data ?? []).filter((run) =>
-    (!status || run.effective_status === status) &&
-    (!search || `${run.name} ${run.alamo_hash ?? ""} ${run.host ?? ""}`.toLowerCase().includes(search.toLowerCase())),
-  ), [runs.data, search, status]);
+  const facets = useQuery({
+    queryKey: ["runs", "facets"],
+    queryFn: () => api<RunFacets>("/runs/facets"),
+    refetchInterval: 60_000,
+  });
+  const data = runs.data ?? [];
+  const sites = facets.data?.sites ?? [];
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
 
   function chooseRun(event: MouseEvent<HTMLAnchorElement>, run: Run) {
@@ -85,16 +104,28 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
       <div className="run-browser-filters">
         <label className="run-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search runs" aria-label="Search runs" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search names, paths, files" aria-label="Search runs" />
         </label>
-        <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter run status">
-          <option value="">All statuses</option>
-          <option>running</option>
-          <option>completed</option>
-          <option>failed</option>
-          <option>interrupted</option>
-          <option>unreachable</option>
-        </select>
+        <div className="run-filter-row">
+          <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter run status">
+            <option value="">Any status</option>
+            <option>starting</option>
+            <option>running</option>
+            <option>completed</option>
+            <option>failed</option>
+            <option>interrupted</option>
+            <option>unreachable</option>
+          </select>
+          <select value={site} onChange={(event) => setSite(event.target.value)} aria-label="Filter storage site">
+            <option value="">Any site</option>
+            {sites.map((facet) => <option value={facet.site} key={facet.site}>{facet.site} ({facet.run_count})</option>)}
+          </select>
+          <select value={thumbnail} onChange={(event) => setThumbnail(event.target.value)} aria-label="Filter thumbnail">
+            <option value="">Any preview</option>
+            <option value="true">Has thumbnail</option>
+            <option value="false">No thumbnail</option>
+          </select>
+        </div>
       </div>
       <div className="run-browser-list" aria-label="Runs">
         {runs.isPending ? <div className="run-browser-state"><span className="spinner" />Loading runs…</div> :
