@@ -25,6 +25,28 @@ interface Member {
 
 const ROOT = "__project_root__";
 const EMPTY_RUN_IDS = new Set<string>();
+const COLLAPSED_FOLDERS_KEY = "zephyr:collapsed-project-folders";
+
+function collapsedFoldersKey(projectId: string) {
+  return `${COLLAPSED_FOLDERS_KEY}:${projectId}`;
+}
+
+function storedCollapsedFolders(projectId: string) {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(collapsedFoldersKey(projectId)) ?? "[]");
+    return new Set<string>(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function storeCollapsedFolders(projectId: string, collapsed: Set<string>) {
+  try {
+    window.localStorage.setItem(collapsedFoldersKey(projectId), JSON.stringify([...collapsed]));
+  } catch {
+    // Folder state is a convenience; keep the project usable if browser storage is unavailable.
+  }
+}
 
 function parentKey(folderId: string | null) {
   return folderId ?? ROOT;
@@ -233,7 +255,7 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => storedCollapsedFolders(project.id));
   const [draggedRunIds, setDraggedRunIds] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showAddRun, setShowAddRun] = useState(false);
@@ -257,6 +279,7 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     const timer = window.setTimeout(() => setSearchQuery(search.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [search]);
+  useEffect(() => storeCollapsedFolders(project.id, collapsed), [collapsed, project.id]);
 
   const moveRuns = useMutation({
     mutationFn: ({ runIds, folderId }: { runIds: string[]; folderId: string | null }) => api<ProjectRunPlacement[]>(`/projects/${project.id}/runs/placement/batch`, {

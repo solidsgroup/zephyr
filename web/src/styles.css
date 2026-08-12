@@ -90,7 +90,7 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-selection-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .run-selection-actions[data-single="true"] { grid-template-columns: 1fr; }
 .run-selection-actions .button { min-width: 0; padding: 7px 5px; font-size: 10px; }
-.run-project-picker { position: absolute; z-index: 10; left: 8px; right: 8px; bottom: 55px; display: flex; flex-direction: column; gap: 13px; border: 1px solid #cbd3df; padding: 17px; background: white; box-shadow: 0 16px 36px #10182830; color: #667085; text-align: left; }
+.run-project-picker { position: absolute; z-index: 10; left: 8px; right: 8px; bottom: 55px; max-height: calc(100vh - 150px); display: flex; flex-direction: column; gap: 13px; overflow-y: auto; border: 1px solid #cbd3df; padding: 17px; background: white; box-shadow: 0 16px 36px #10182830; color: #667085; text-align: left; }
 .run-project-picker > header { display: grid; grid-template-columns: 34px minmax(0, 1fr) 26px; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #edf0f4; }
 .run-project-picker > header > span { width: 34px; height: 34px; display: grid; place-items: center; background: #eaf2ff; color: #175cd3; font-size: 19px; }
 .run-project-picker > header > div { display: flex; flex-direction: column; gap: 2px; }
@@ -98,8 +98,20 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-project-picker > header small { color: #98a2b3; font-size: 9px; }
 .run-project-picker > header > button { width: 26px; height: 26px; border: 0; background: transparent; color: #7c8799; font-size: 20px; }
 .run-project-picker > header > button:hover { background: #f1f4f8; color: #344054; }
+.run-project-field { display: flex; flex-direction: column; gap: 5px; }
+.run-project-field > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #667085; font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.run-project-field > div button { border: 0; padding: 3px 0; background: transparent; color: #175cd3; font-size: 8px; font-weight: 700; }
+.run-project-field > div button:hover { color: #004eeb; }
+.run-project-field > div button:disabled { color: #b2bac6; cursor: default; }
 .run-project-picker label { display: flex; flex-direction: column; gap: 5px; color: #667085; font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .run-project-picker select { width: 100%; height: 38px; border: 1px solid #cfd6e0; padding: 7px 9px; background: white; color: #344054; font-size: 11px; text-transform: none; }
+.run-project-create { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; border-block: 1px solid #e4e8ee; margin-inline: -17px; padding: 13px 17px; background: #f8fafc; }
+.run-project-create > strong, .run-project-create > p, .run-project-create > div { grid-column: 1 / -1; }
+.run-project-create > strong { color: #344054; font-size: 10px; }
+.run-project-create input { width: 100%; height: 34px; border: 1px solid #cfd6e0; padding: 6px 8px; background: white; color: #344054; font-size: 10px; }
+.run-project-create > div { display: grid; grid-template-columns: .75fr 1.25fr; gap: 8px; }
+.run-project-create > div .button { width: 100%; padding: 8px; font-size: 9px; }
+.run-project-picker .run-project-create > p { margin: 0; }
 .run-project-picker p { margin: -5px 0 0; color: #98a2b3; font-size: 8px; line-height: 1.5; }
 .run-project-picker p.error-text { color: #b42318; }
 .run-project-picker-actions { display: grid; grid-template-columns: .75fr 1.25fr; gap: 8px; padding-top: 2px; }

@@ -14,6 +14,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 function run(id: string, name: string): Run {
@@ -217,6 +218,66 @@ describe("RunBrowser", () => {
       )).toBe(true);
     });
   });
+
+  it("creates projects and destination folders while adding a run", async () => {
+    const ownedRun = run("one", "Run one");
+    const editableProjects: Array<Record<string, unknown>> = [];
+    const createdProject = { id: "created", owner_id: "owner", slug: "parameter-study", name: "Parameter study", description: "", visibility: "private" };
+    const createdFolder = { id: "cases", project_id: "created", parent_id: null, name: "Cases", position: 0 };
+    const folders: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
+      const url = String(request);
+      let body: unknown = [ownedRun];
+      let status = 200;
+      if (url.includes("/runs/facets")) {
+        body = { sites: [] };
+      } else if (url.includes("/projects?editable=true")) {
+        body = editableProjects;
+      } else if (url.endsWith("/projects") && options?.method === "POST") {
+        editableProjects.push(createdProject);
+        body = createdProject;
+        status = 201;
+      } else if (url.includes("/projects/created/layout")) {
+        body = { folders, runs: [] };
+      } else if (url.endsWith("/projects/created/folders") && options?.method === "POST") {
+        folders.push(createdFolder);
+        body = createdFolder;
+        status = 201;
+      } else if (url.endsWith("/projects/created/runs/batch")) {
+        body = { added: 1, already_present: 0 };
+      }
+      return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(<QueryClientProvider client={queryClient}><RunBrowser open onClose={() => undefined} /></QueryClientProvider>);
+    const browser = within(view.container);
+
+    fireEvent.click(await browser.findByRole("link", { name: "Run one" }), { ctrlKey: true });
+    fireEvent.click(browser.getByRole("button", { name: "Add to project" }));
+    fireEvent.click(await browser.findByRole("button", { name: "＋ New project" }));
+    fireEvent.change(browser.getByLabelText("New project name"), { target: { value: "Parameter study" } });
+    expect(browser.getByLabelText("New project slug")).toHaveValue("parameter-study");
+    fireEvent.click(browser.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(browser.getByLabelText("Choose project")).toHaveValue("created"));
+
+    const newFolderButton = browser.getByRole("button", { name: "＋ New folder" });
+    await waitFor(() => expect(newFolderButton).toBeEnabled());
+    fireEvent.click(newFolderButton);
+    fireEvent.change(browser.getByLabelText("New folder name"), { target: { value: "Cases" } });
+    fireEvent.click(browser.getByRole("button", { name: "Create folder" }));
+    await waitFor(() => expect(browser.getByLabelText("Choose project folder")).toHaveValue("cases"));
+    fireEvent.click(browser.getByRole("button", { name: "Add run" }));
+
+    await waitFor(() => {
+      const projectCall = fetchMock.mock.calls.find(([request, options]) => String(request).endsWith("/projects") && options?.method === "POST");
+      expect(JSON.parse(String(projectCall?.[1]?.body))).toEqual({ name: "Parameter study", slug: "parameter-study", visibility: "private" });
+      const folderCall = fetchMock.mock.calls.find(([request]) => String(request).endsWith("/projects/created/folders"));
+      expect(JSON.parse(String(folderCall?.[1]?.body))).toEqual({ name: "Cases", parent_id: null });
+      const addCall = fetchMock.mock.calls.find(([request]) => String(request).endsWith("/projects/created/runs/batch"));
+      expect(JSON.parse(String(addCall?.[1]?.body))).toEqual({ run_ids: ["one"], folder_id: "cases" });
+    });
+  });
 });
 
 describe("ProjectsPage", () => {
@@ -256,6 +317,7 @@ describe("ProjectsPage", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: options?.method === "DELETE" ? 204 : 200, headers: { "Content-Type": "application/json" } }));
     });
     vi.stubGlobal("fetch", fetchMock);
+    window.localStorage.setItem("zephyr:collapsed-project-folders:project", JSON.stringify(["cases"]));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(["me"], { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null });
 
@@ -265,10 +327,10 @@ describe("ProjectsPage", () => {
     expect(await page.findByRole("button", { name: "stdout" })).toBeInTheDocument();
     expect(page.getByRole("button", { name: "git diff" })).toBeInTheDocument();
     const casesButton = (await page.findByText("Cases")).closest("button")!;
-    expect(page.getByText("GPU")).toBeInTheDocument();
-    fireEvent.click(casesButton);
     expect(page.queryByText("GPU")).not.toBeInTheDocument();
     fireEvent.click(casesButton);
+    expect(page.getByText("GPU")).toBeInTheDocument();
+    await waitFor(() => expect(window.localStorage.getItem("zephyr:collapsed-project-folders:project")).toBe("[]"));
 
     const runRows = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".project-run-row"));
     fireEvent.click(runRows[0]);

@@ -42,6 +42,18 @@ function folderOptions(folders: ProjectFolder[]) {
   return options;
 }
 
+function projectSlug(value: string) {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100);
+}
+
+function mutationError(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function ArtifactStack({ run }: { run: Run }) {
   if (!run.artifact_previews.length) {
     return <span className="run-preview-empty" aria-label="No artifacts">Z</span>;
@@ -86,6 +98,13 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [projectId, setProjectId] = useState("");
   const [projectFolderId, setProjectFolderId] = useState("");
   const [projectNotice, setProjectNotice] = useState("");
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectSlug, setNewProjectSlug] = useState("");
+  const [newProjectVisibility, setNewProjectVisibility] = useState<Project["visibility"]>("private");
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderParentId, setNewFolderParentId] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const value = search.trim();
@@ -135,6 +154,42 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     enabled: showProjectPicker && Boolean(projectId),
   });
   const destinationFolders = useMemo(() => folderOptions(projectLayout.data?.folders ?? []), [projectLayout.data?.folders]);
+  const createProject = useMutation({
+    mutationFn: () => api<Project>("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name: newProjectName.trim(), slug: newProjectSlug, visibility: newProjectVisibility }),
+    }),
+    onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(["projects", "editable"], (current) => {
+        if (current?.some((item) => item.id === project.id)) return current;
+        return [...(current ?? []), project].sort((left, right) => left.name.localeCompare(right.name));
+      });
+      setProjectId(project.id);
+      setProjectFolderId("");
+      setShowCreateProject(false);
+      setNewProjectName("");
+      setNewProjectSlug("");
+      setNewProjectVisibility("private");
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const createFolder = useMutation({
+    mutationFn: () => api<ProjectFolder>(`/projects/${projectId}/folders`, {
+      method: "POST",
+      body: JSON.stringify({ name: newFolderName.trim(), parent_id: newFolderParentId || null }),
+    }),
+    onSuccess: (folder) => {
+      queryClient.setQueryData<ProjectLayout>(["project-layout", projectId], (current) => ({
+        folders: [...(current?.folders ?? []), folder],
+        runs: current?.runs ?? [],
+      }));
+      setProjectFolderId(folder.id);
+      setShowCreateFolder(false);
+      setNewFolderName("");
+      setNewFolderParentId("");
+      queryClient.invalidateQueries({ queryKey: ["project-layout", projectId] });
+    },
+  });
   const addToProject = useMutation({
     mutationFn: () => api<{ added: number; already_present: number }>(`/projects/${projectId}/runs/batch`, {
       method: "POST",
@@ -146,6 +201,8 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
       setProjectNotice(`Added ${result.added} to ${project?.name ?? "project"}${existing}`);
       setShowProjectPicker(false);
       setProjectFolderId("");
+      setShowCreateProject(false);
+      setShowCreateFolder(false);
       queryClient.invalidateQueries({ queryKey: ["project-layout", projectId] });
       queryClient.invalidateQueries({ queryKey: ["runs", "browser"] });
     },
@@ -260,29 +317,45 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
             <div><strong>Add to project</strong><small>{selectedIds.length} {selectedIds.length === 1 ? "run" : "runs"} selected</small></div>
             <button aria-label="Close project picker" onClick={() => setShowProjectPicker(false)}>×</button>
           </header>
-          {projects.isPending ? <div className="run-project-picker-state"><span className="spinner" />Loading projects…</div> : projects.data?.length ? <>
-            <label>
-              <span>Project</span>
-              <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setProjectFolderId(""); addToProject.reset(); }} aria-label="Choose project">
+          {projects.isPending ? <div className="run-project-picker-state"><span className="spinner" />Loading projects…</div> : projects.isError ? <div className="run-project-picker-state error-text">Could not load projects.</div> : <>
+            <div className="run-project-field">
+              <div><span>Project</span><button onClick={() => { setShowCreateProject((value) => !value); setShowCreateFolder(false); createProject.reset(); }}>＋ New project</button></div>
+              <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setProjectFolderId(""); setShowCreateFolder(false); setNewFolderParentId(""); addToProject.reset(); createFolder.reset(); }} aria-label="Choose project">
                 <option value="">Choose project…</option>
-                {projects.data.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+                {projects.data?.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
               </select>
-            </label>
-            <label>
-              <span>Destination</span>
+            </div>
+            {showCreateProject && <div className="run-project-create">
+              <strong>New project</strong>
+              <label><span>Name</span><input autoFocus value={newProjectName} onChange={(event) => { const name = event.target.value; setNewProjectName(name); setNewProjectSlug(projectSlug(name)); }} aria-label="New project name" placeholder="Parameter study" /></label>
+              <label><span>URL slug</span><input value={newProjectSlug} onChange={(event) => setNewProjectSlug(projectSlug(event.target.value))} aria-label="New project slug" placeholder="parameter-study" /></label>
+              <label><span>Visibility</span><select value={newProjectVisibility} onChange={(event) => setNewProjectVisibility(event.target.value as Project["visibility"])} aria-label="New project visibility"><option value="private">Private</option><option value="group">Group</option><option value="public">Public</option></select></label>
+              {createProject.isError && <p className="error-text">{mutationError(createProject.error, "Could not create this project.")}</p>}
+              <div><button className="button" onClick={() => setShowCreateProject(false)}>Cancel</button><button className="button button-primary" disabled={!newProjectName.trim() || newProjectSlug.length < 3 || createProject.isPending} onClick={() => createProject.mutate()}>{createProject.isPending ? "Creating…" : "Create project"}</button></div>
+            </div>}
+            {!projects.data?.length && !showCreateProject && <p>No editable projects yet. Create one here to organize these runs.</p>}
+            <div className="run-project-field">
+              <div><span>Destination</span><button disabled={!projectId || projectLayout.isPending || projectLayout.isError} onClick={() => { setShowCreateFolder((value) => !value); setShowCreateProject(false); setNewFolderParentId(projectFolderId); createFolder.reset(); }}>＋ New folder</button></div>
               <select value={projectFolderId} onChange={(event) => setProjectFolderId(event.target.value)} aria-label="Choose project folder" disabled={!projectId || projectLayout.isPending || projectLayout.isError}>
-                <option value="">{projectLayout.isPending ? "Loading folders…" : "Project root"}</option>
+                <option value="">{projectId && projectLayout.isPending ? "Loading folders…" : "Project root"}</option>
                 {destinationFolders.map((folder) => <option value={folder.id} key={folder.id}>{folder.label}</option>)}
               </select>
-            </label>
+            </div>
+            {showCreateFolder && projectId && <div className="run-project-create">
+              <strong>New folder</strong>
+              <label><span>Name</span><input autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} aria-label="New folder name" placeholder="Cases" /></label>
+              <label><span>Inside</span><select value={newFolderParentId} onChange={(event) => setNewFolderParentId(event.target.value)} aria-label="New folder parent"><option value="">Project root</option>{destinationFolders.map((folder) => <option value={folder.id} key={folder.id}>{folder.label}</option>)}</select></label>
+              {createFolder.isError && <p className="error-text">{mutationError(createFolder.error, "Could not create this folder.")}</p>}
+              <div><button className="button" onClick={() => setShowCreateFolder(false)}>Cancel</button><button className="button button-primary" disabled={!newFolderName.trim() || createFolder.isPending} onClick={() => createFolder.mutate()}>{createFolder.isPending ? "Creating…" : "Create folder"}</button></div>
+            </div>}
             {projectId && !projectLayout.isPending && !projectLayout.isError && !destinationFolders.length && <p>This project has no folders yet. Runs will be added at the root.</p>}
             {projectLayout.isError && <p className="error-text">Could not load this project’s folders.</p>}
             {addToProject.isError && <p className="error-text">Could not add the selected {selectedIds.length === 1 ? "run" : "runs"}.</p>}
             <div className="run-project-picker-actions">
               <button className="button" onClick={() => setShowProjectPicker(false)}>Cancel</button>
-              <button className="button button-primary" disabled={!projectId || projectLayout.isPending || projectLayout.isError || addToProject.isPending} onClick={() => addToProject.mutate()}>{addToProject.isPending ? "Adding…" : `Add ${selectedIds.length === 1 ? "run" : `${selectedIds.length} runs`}`}</button>
+              <button className="button button-primary" disabled={!projectId || projectLayout.isPending || projectLayout.isError || createProject.isPending || createFolder.isPending || addToProject.isPending} onClick={() => addToProject.mutate()}>{addToProject.isPending ? "Adding…" : `Add ${selectedIds.length === 1 ? "run" : `${selectedIds.length} runs`}`}</button>
             </div>
-          </> : <div className="run-project-picker-state">No editable projects. <Link href="/projects">Create one</Link></div>}
+          </>}
         </div>}
         {projectNotice && <span className="run-project-notice">{projectNotice}</span>}
         {selectedIds.length >= 1 ? <>
