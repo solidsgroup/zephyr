@@ -184,7 +184,7 @@ export function CopyLocations({ copies }: { copies: RunCopy[] }) {
           <div className="copy-path"><code title={copy.path}>{copy.path}</code><CopyButton value={copy.path} label="path" compact /></div>
           <div className="copy-contents">
             <strong>{copy.file_count.toLocaleString()} files</strong>
-            <small>{formatBytes(copy.total_size_bytes)}</small>
+            <small>{copy.total_size_bytes === null ? "Fast inventory" : formatBytes(copy.total_size_bytes)}</small>
             {(copy.has_cell_data || copy.has_node_data) && <span className="simulation-copy-badge">Simulation data</span>}
             {copy.has_cell_data && <span className="copy-data-badge">cell</span>}
             {copy.has_node_data && <span className="copy-data-badge">node</span>}

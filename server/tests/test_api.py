@@ -134,8 +134,45 @@ async def test_run_lifecycle_and_public_project() -> None:
                 headers=headers,
             )
             assert second_copy.status_code == 200
+            batch_copies = await client.put(
+                "/api/v1/runs/copies/batch",
+                json={
+                    "copies": [
+                        {
+                            "run_id": run_id,
+                            "site": "stampede3",
+                            "host": "login2",
+                            "path": "/scratch/brunnels/output.481516",
+                            "platform": "Linux",
+                            "file_count": 1260,
+                            "total_size_bytes": None,
+                            "has_cell_data": True,
+                            "has_node_data": True,
+                            "manifest_digest": "d" * 64,
+                            "last_action": "sync",
+                        },
+                        {
+                            "run_id": run_id,
+                            "site": "workstation",
+                            "host": "desktop",
+                            "path": "/home/user/output.481516",
+                            "platform": "Linux",
+                            "file_count": 4,
+                            "total_size_bytes": None,
+                            "has_cell_data": False,
+                            "has_node_data": False,
+                            "manifest_digest": "e" * 64,
+                            "last_action": "sync",
+                        },
+                    ]
+                },
+                headers=headers,
+            )
+            assert batch_copies.status_code == 200
+            assert batch_copies.json() == {"updated": 2}
             copies = await client.get(f"/api/v1/runs/{run_id}/copies")
             assert len(copies.json()) == 2
+            assert {copy["total_size_bytes"] for copy in copies.json()} == {None}
 
             # Recreate a legacy row that retained metadata but not scheduler columns.
             async with SessionLocal() as db:

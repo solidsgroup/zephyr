@@ -82,12 +82,15 @@ registration uses a single catalog lookup and up to four concurrent syncs.
 
 `zph sync PATH...` recursively discovers every Alamo copy beneath the supplied
 paths, including multiple directories with the same HASH. Unlike the fast
-discovery pass used by `zph add`, it deliberately inventories the full contents
-of each run, including BoxLib trees. Zephyr records the absolute path, storage
-site and host, regular-file count, total size, a filename/size/mtime fingerprint,
-and whether numbered `cell` or `node` data is present. It does not upload the
-raw dataset. Moving a copy creates a new known location; the previous location
-is retained with its last update time. Set `ZEPHYR_SITE` to give shared cluster
+discovery pass used by `zph add`, it inventories filenames throughout each run,
+including BoxLib trees. The default scan avoids per-file stat calls and reuses
+an incremental cache in `~/.config/zephyr/sync-cache.json` when directory
+timestamps show that filenames have not changed. Zephyr records the absolute
+path, storage site and host, file count, a path fingerprint, and whether numbered
+`cell` or `node` data is present. It does not upload the raw dataset. Use
+`zph sync --deep PATH` when a full byte total and size/mtime fingerprint are
+needed. Moving a copy creates a new known location; the previous location is
+retained with its last update time. Set `ZEPHYR_SITE` to give shared cluster
 storage a stable name when `SLURM_CLUSTER_NAME` is unavailable.
 
 Upload and restore results:

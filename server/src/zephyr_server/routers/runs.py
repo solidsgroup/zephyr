@@ -34,6 +34,7 @@ from ..schemas import (
     Heartbeat,
     MetadataRead,
     MetadataWrite,
+    RunCopyBatchWrite,
     RunCopyRead,
     RunCopyWrite,
     RunCreate,
@@ -393,6 +394,44 @@ async def list_run_copies(
             .order_by(RunCopy.updated_at.desc())
         )
     )
+
+
+@router.put("/copies/batch")
+async def update_run_copies_batch(
+    payload: RunCopyBatchWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    run_ids = {item.run_id for item in payload.copies}
+    owned_run_ids = set(
+        await db.scalars(
+            select(Run.id).where(Run.id.in_(run_ids), Run.owner_id == user.id)
+        )
+    )
+    if owned_run_ids != run_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the owner can update copy locations",
+        )
+
+    existing = list(
+        await db.scalars(select(RunCopy).where(RunCopy.run_id.in_(run_ids)))
+    )
+    records = {(record.run_id, record.site, record.path): record for record in existing}
+    for item in payload.copies:
+        values = item.model_dump(exclude={"run_id"})
+        key = (item.run_id, item.site, item.path)
+        record = records.get(key)
+        if record is None:
+            record = RunCopy(run_id=item.run_id, **values)
+            records[key] = record
+            db.add(record)
+        else:
+            for name, value in values.items():
+                setattr(record, name, value)
+            record.updated_at = utcnow()
+    await db.commit()
+    return {"updated": len(payload.copies)}
 
 
 @router.put("/{run_id}/copies", response_model=RunCopyRead)

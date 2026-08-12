@@ -55,6 +55,45 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
+def sync_cache_path() -> Path:
+    return config_dir() / "sync-cache.json"
+
+
+def load_sync_cache() -> dict[str, Any]:
+    path = sync_cache_path()
+    if not path.exists():
+        return {"version": 1, "paths": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"version": 1, "paths": {}}
+    if data.get("version") != 1 or not isinstance(data.get("paths"), dict):
+        return {"version": 1, "paths": {}}
+    return data
+
+
+def save_sync_cache(data: dict[str, Any]) -> None:
+    directory = config_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, stat.S_IRWXU)
+    descriptor, temporary_name = tempfile.mkstemp(prefix="sync-cache.", dir=directory)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, sync_cache_path())
+        os.chmod(sync_cache_path(), stat.S_IRUSR | stat.S_IWUSR)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 @dataclass(frozen=True)
 class Credentials:
     server: str

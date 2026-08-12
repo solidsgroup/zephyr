@@ -65,10 +65,13 @@ registration resolves the server catalog once and synchronizes up to four runs
 concurrently.
 
 `zph sync PATH...` finds every metadata-rooted copy recursively, including
-several copies with the same HASH, then inventories all regular files below
-each run. It records the absolute path, site/host, file count, total size, a
-filename/size/mtime fingerprint, and the presence of numbered BoxLib `cell` or
-`node` trees. This is an inventory operation: it does not upload the raw files.
+several copies with the same HASH, then inventories filenames below each run.
+It records the absolute path, site/host, file count, path fingerprint, and the
+presence of numbered BoxLib `cell` or `node` trees. The normal scan avoids
+per-file stat calls and uses `~/.config/zephyr/sync-cache.json` to skip directory
+reads when all cached directory timestamps are unchanged. Use
+`zph sync --deep PATH` to additionally recompute total bytes and a size/mtime
+fingerprint. This is an inventory operation: it never uploads the raw files.
 Old locations remain visible with their last update time after a copy is moved.
 Set `ZEPHYR_SITE` to a stable cluster or filesystem name if the hostname is too
 specific; `SLURM_CLUSTER_NAME` is used automatically when available.

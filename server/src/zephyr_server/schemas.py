@@ -190,11 +190,19 @@ class RunCopyWrite(BaseModel):
     path: str = Field(min_length=1, max_length=2000)
     platform: str | None = Field(default=None, max_length=255)
     file_count: int = Field(ge=0)
-    total_size_bytes: int = Field(ge=0)
+    total_size_bytes: int | None = Field(default=None, ge=0)
     has_cell_data: bool = False
     has_node_data: bool = False
     manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     last_action: Literal["get", "put", "sync"]
+
+
+class RunCopyBatchItem(RunCopyWrite):
+    run_id: uuid.UUID
+
+
+class RunCopyBatchWrite(BaseModel):
+    copies: list[RunCopyBatchItem] = Field(min_length=1, max_length=1000)
 
 
 class RunCopyRead(RunCopyWrite):

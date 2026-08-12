@@ -57,6 +57,7 @@ async def protocol_metadata() -> dict[str, object]:
             "run-output",
             "bulk-sync-state",
             "copy-locations",
+            "bulk-copy-locations",
             "scheduler-context",
             "thermo-segments",
             "artifacts",

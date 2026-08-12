@@ -5,6 +5,11 @@
   "capabilities": [
     "runs",
     "metadata",
+    "run-output",
+    "bulk-sync-state",
+    "copy-locations",
+    "bulk-copy-locations",
+    "scheduler-context",
     "thermo-segments",
     "artifacts",
     "projects",

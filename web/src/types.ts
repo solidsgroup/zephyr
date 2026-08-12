@@ -77,7 +77,7 @@ export interface RunCopy {
   path: string;
   platform: string | null;
   file_count: number;
-  total_size_bytes: number;
+  total_size_bytes: number | null;
   has_cell_data: boolean;
   has_node_data: boolean;
   manifest_digest: string;
