@@ -320,6 +320,27 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert placed.status_code == 200
             assert placed.json()["folder_id"] == gpu_folder_id
             assert placed.json()["position"] == 2
+            collection_placed = await client.put(
+                f"/api/v1/projects/{project_id}/runs/placement/batch",
+                json={
+                    "run_ids": [run_id, batch_run_id],
+                    "folder_id": gpu_folder_id,
+                    "position": 4,
+                },
+                headers=headers,
+            )
+            assert collection_placed.status_code == 200
+            assert [item["run"]["id"] for item in collection_placed.json()] == [
+                run_id,
+                batch_run_id,
+            ]
+            assert [item["position"] for item in collection_placed.json()] == [4, 5]
+            project_search = await client.get(
+                "/api/v1/runs",
+                params={"project_id": project_id, "search": "Batch project run"},
+            )
+            assert project_search.status_code == 200
+            assert [item["id"] for item in project_search.json()] == [batch_run_id]
             layout = await client.get(f"/api/v1/projects/{project_id}/layout")
             assert {folder["name"] for folder in layout.json()["folders"]} == {"Cases", "GPU"}
             placement = next(item for item in layout.json()["runs"] if item["run"]["id"] == run_id)

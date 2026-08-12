@@ -359,6 +359,10 @@ class ProjectRunPlacementWrite(BaseModel):
     position: int = Field(default=0, ge=0)
 
 
+class ProjectRunPlacementBatchWrite(ProjectRunPlacementWrite):
+    run_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+
+
 class ProjectRunPlacementRead(BaseModel):
     run: RunRead
     folder_id: uuid.UUID | None

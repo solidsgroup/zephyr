@@ -198,8 +198,8 @@ async def artifact_previews_for_runs(
     return result
 
 
-def accessible_run_ids(user: User):
-    project_ids = select(Project.id).where(
+def accessible_project_ids(user: User):
+    return select(Project.id).where(
         or_(
             Project.owner_id == user.id,
             Project.visibility.in_({"group", "public"}),
@@ -208,7 +208,12 @@ def accessible_run_ids(user: User):
             ),
         )
     )
-    return select(RunProject.run_id).where(RunProject.project_id.in_(project_ids))
+
+
+def accessible_run_ids(user: User):
+    return select(RunProject.run_id).where(
+        RunProject.project_id.in_(accessible_project_ids(user))
+    )
 
 
 async def get_accessible_run(db: AsyncSession, user: User, run_id: uuid.UUID) -> Run:
@@ -227,6 +232,7 @@ async def get_accessible_run(db: AsyncSession, user: User, run_id: uuid.UUID) ->
 async def list_runs(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = None,
+    project_id: uuid.UUID | None = None,
     has_thumbnail: bool | None = None,
     site: str | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
@@ -235,6 +241,15 @@ async def list_runs(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Run).where(or_(Run.owner_id == user.id, Run.id.in_(accessible_run_ids(user))))
+    if project_id is not None:
+        query = query.where(
+            Run.id.in_(
+                select(RunProject.run_id).where(
+                    RunProject.project_id == project_id,
+                    RunProject.project_id.in_(accessible_project_ids(user)),
+                )
+            )
+        )
     if status_filter:
         stale_before = utcnow() - timedelta(minutes=2)
         stale_heartbeat = and_(

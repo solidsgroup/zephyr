@@ -131,6 +131,13 @@ describe("RunBrowser", () => {
 
     fireEvent.click(first, { ctrlKey: true });
     expect(browser.getByText("Shift-click a range or Ctrl/Cmd-click another run")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Shift" });
+    fireEvent.mouseEnter(third.closest(".run-browser-item")!);
+    expect(first.closest(".run-browser-item")).toHaveAttribute("data-range-preview", "true");
+    expect(second.closest(".run-browser-item")).toHaveAttribute("data-range-preview", "true");
+    expect(third.closest(".run-browser-item")).toHaveAttribute("data-range-preview", "true");
+    fireEvent.keyUp(window, { key: "Shift" });
+    expect(second.closest(".run-browser-item")).not.toHaveAttribute("data-range-preview");
     fireEvent.click(third, { shiftKey: true });
     expect(browser.getByRole("button", { name: "Compare 3" })).toBeInTheDocument();
     expect(close).not.toHaveBeenCalled();
@@ -198,12 +205,15 @@ describe("ProjectsPage", () => {
       let body: unknown = [];
       if (url.includes("/auth/me")) {
         body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
-      } else if (url.includes("/projects/project/runs/simulation/placement")) {
-        body = { run: projectRun, folder_id: "gpu", position: 0 };
+      } else if (url.includes("/projects/project/runs/placement/batch")) {
+        const request = JSON.parse(String(options?.body));
+        body = request.run_ids.map((id: string, position: number) => ({ run: projectRuns.find((item) => item.id === id), folder_id: "gpu", position }));
       } else if (url.includes("/projects/project/layout")) {
         body = layout;
       } else if (url.includes("/projects")) {
         body = [project];
+      } else if (url.includes("/runs?") && url.includes("search=")) {
+        body = [secondRun];
       } else if (url.includes("/runs/") && url.endsWith("/artifacts")) {
         body = [];
       } else if (url.includes("/runs/")) {
@@ -229,6 +239,10 @@ describe("ProjectsPage", () => {
 
     const runRows = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".project-run-row"));
     fireEvent.click(runRows[0]);
+    fireEvent.keyDown(window, { key: "Shift" });
+    fireEvent.mouseEnter(runRows[2]);
+    expect(runRows.every((row) => row.dataset.rangePreview === "true")).toBe(true);
+    fireEvent.keyUp(window, { key: "Shift" });
     fireEvent.click(runRows[2], { shiftKey: true });
     expect(runRows).toHaveLength(3);
     expect(runRows.every((row) => row.dataset.selected === "true")).toBe(true);
@@ -242,10 +256,14 @@ describe("ProjectsPage", () => {
     fireEvent.drop(gpuDropTarget, { dataTransfer: transfer });
 
     await waitFor(() => {
-      const placementCall = fetchMock.mock.calls.find(([request]) => String(request).includes("/placement"));
+      const placementCall = fetchMock.mock.calls.find(([request]) => String(request).includes("/placement/batch"));
       expect(placementCall).toBeDefined();
-      expect(JSON.parse(String(placementCall?.[1]?.body))).toEqual({ folder_id: "gpu", position: 0 });
+      expect(JSON.parse(String(placementCall?.[1]?.body))).toEqual({ run_ids: ["simulation", "simulation-two", "simulation-three"], folder_id: "gpu", position: 0 });
     });
+
+    fireEvent.change(page.getByLabelText("Search project runs"), { target: { value: "Simulation two" } });
+    await waitFor(() => expect(view.container.querySelectorAll(".project-run-row")).toHaveLength(1));
+    expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
   });
 });
 

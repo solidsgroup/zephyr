@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "../api";
 import { isVideoContentType, isVisualContentType } from "../artifacts";
+import { selectionRange, useShiftPressed } from "../selection";
 import type { Project, Run, RunFacets } from "../types";
 import LazyVideo from "./LazyVideo";
 import StatusPill from "./StatusPill";
@@ -60,6 +61,8 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [thumbnail, setThumbnail] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const selectionAnchor = useRef<string | null>(null);
+  const shiftPressed = useShiftPressed();
+  const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [projectNotice, setProjectNotice] = useState("");
@@ -90,9 +93,16 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     queryFn: ({ signal }) => api<RunFacets>("/runs/facets", { signal }),
     refetchInterval: 60_000,
   });
-  const data = runs.data ?? [];
+  const data = useMemo(() => runs.data ?? [], [runs.data]);
   const sites = facets.data?.sites ?? [];
   const selectedIds = data.filter((run) => selected[run.id]).map((run) => run.id);
+  const rangeAnchorId = selectionAnchor.current && selected[selectionAnchor.current]
+    ? selectionAnchor.current
+    : selectedIds.at(-1) ?? null;
+  const rangePreviewIds = useMemo(
+    () => shiftPressed ? selectionRange(data.map((run) => run.id), rangeAnchorId, hoveredRunId) : new Set<string>(),
+    [data, hoveredRunId, rangeAnchorId, shiftPressed],
+  );
   const projects = useQuery({
     queryKey: ["projects", "editable"],
     queryFn: () => api<Project[]>("/projects?editable=true"),
@@ -118,16 +128,11 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
       event.stopPropagation();
     }
     if (event.shiftKey) {
-      const anchorId = selectionAnchor.current ?? selectedIds.at(-1) ?? run.id;
-      const anchorIndex = data.findIndex((item) => item.id === anchorId);
-      const runIndex = data.findIndex((item) => item.id === run.id);
-      if (anchorIndex >= 0 && runIndex >= 0) {
-        const first = Math.min(anchorIndex, runIndex);
-        const last = Math.max(anchorIndex, runIndex);
-        const range = data.slice(first, last + 1);
+      const range = selectionRange(data.map((item) => item.id), rangeAnchorId ?? run.id, run.id);
+      if (range.size) {
         setSelected((current) => {
           const next = event.ctrlKey || event.metaKey ? { ...current } : {};
-          for (const item of range) next[item.id] = true;
+          for (const id of range) next[id] = true;
           return next;
         });
       }
@@ -187,7 +192,15 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
             const active = location === `/runs/${run.id}`;
             const chosen = Boolean(selected[run.id]);
             return (
-              <div className="run-browser-item" data-active={active} data-selected={chosen} key={run.id}>
+              <div
+                className="run-browser-item"
+                data-active={active}
+                data-selected={chosen}
+                data-range-preview={rangePreviewIds.has(run.id) || undefined}
+                key={run.id}
+                onMouseEnter={() => setHoveredRunId(run.id)}
+                onMouseLeave={() => setHoveredRunId((current) => current === run.id ? null : current)}
+              >
                 <Link
                   href={`/runs/${run.id}`}
                   onClickCapture={(event) => chooseRun(event, run)}

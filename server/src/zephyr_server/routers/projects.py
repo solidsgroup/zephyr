@@ -22,6 +22,7 @@ from ..schemas import (
     ProjectRunAdd,
     ProjectRunBatchAdd,
     ProjectRunBatchResult,
+    ProjectRunPlacementBatchWrite,
     ProjectRunPlacementRead,
     ProjectRunPlacementWrite,
     ProjectUpdate,
@@ -470,6 +471,47 @@ async def list_project_runs(
     )
     previews = await artifact_previews_for_runs(db, runs)
     return [run_read(run, *previews.get(run.id, (0, []))) for run in runs]
+
+
+@router.put(
+    "/{project_id}/runs/placement/batch",
+    response_model=list[ProjectRunPlacementRead],
+)
+async def place_runs(
+    project_id: uuid.UUID,
+    payload: ProjectRunPlacementBatchWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProjectRunPlacementRead]:
+    project = await editable_project(db, user, project_id)
+    if payload.folder_id is not None:
+        await project_folder(db, project.id, payload.folder_id)
+    run_ids = list(dict.fromkeys(payload.run_ids))
+    links = list(
+        await db.scalars(
+            select(RunProject).where(
+                RunProject.project_id == project.id,
+                RunProject.run_id.in_(run_ids),
+            )
+        )
+    )
+    if {link.run_id for link in links} != set(run_ids):
+        raise HTTPException(status_code=404, detail="One or more runs are not in this project")
+    runs = list(await db.scalars(select(Run).where(Run.id.in_(run_ids))))
+    runs_by_id = {run.id: run for run in runs}
+    links_by_id = {link.run_id: link for link in links}
+    for offset, run_id in enumerate(run_ids):
+        links_by_id[run_id].folder_id = payload.folder_id
+        links_by_id[run_id].position = payload.position + offset
+    await db.commit()
+    return [
+        ProjectRunPlacementRead(
+            run=run_read(runs_by_id[run_id]),
+            folder_id=links_by_id[run_id].folder_id,
+            position=links_by_id[run_id].position,
+        )
+        for run_id in run_ids
+    ]
 
 
 @router.put(
