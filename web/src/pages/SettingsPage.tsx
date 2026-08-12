@@ -25,7 +25,7 @@ export default function SettingsPage() {
         {created && <div className="token-reveal"><strong>Copy this token now — it will not be shown again.</strong><code>{created}</code><button className="button" onClick={() => navigator.clipboard.writeText(created)}>Copy</button></div>}
         <div className="compact-list token-list">{tokens.data?.map((token) => <div key={token.id}><span className="token-icon">⌘</span><span><strong>{token.name}</strong><small>zph_{token.prefix}_… · created {new Date(token.created_at).toLocaleDateString()}{token.last_used_at ? ` · used ${new Date(token.last_used_at).toLocaleDateString()}` : ""}</small></span><button className="button button-danger" disabled={Boolean(token.revoked_at)} onClick={() => revoke.mutate(token.id)}>{token.revoked_at ? "Revoked" : "Revoke"}</button></div>)}</div>
       </section>
-      <section className="panel cli-help"><h2>Connect a workstation</h2><pre><span>$</span> pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'{"\n"}<span>$</span> zph login {window.location.origin}</pre></section>
+      <section className="panel cli-help"><h2>Connect a workstation or cluster</h2><pre><span>$</span> python3 -m pip install --user --upgrade 'https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli'{"\n"}<span>$</span> zph login {window.location.origin}{"\n"}<span>$</span> zph --upgrade <small># for future updates</small></pre></section>
     </>
   );
 }

@@ -9,6 +9,7 @@ import mimetypes
 import os
 import platform
 import re
+import shlex
 import signal
 import socket
 import stat
@@ -82,6 +83,9 @@ SLURM_DETAIL_ENVIRONMENT = {
 }
 SYNCED_METADATA_DIGESTS: dict[str, str] = {}
 SYNCED_OUTPUT_DIGESTS: dict[tuple[str, str], str] = {}
+ZPH_SOURCE_ARCHIVE = (
+    "https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli"
+)
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -104,6 +108,33 @@ class DirectoryInventory:
 
 def utcnow() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def pip_upgrade_command() -> list[str]:
+    command = [sys.executable, "-m", "pip", "install", "--upgrade", "--no-deps"]
+    in_managed_environment = (
+        sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+        or hasattr(sys, "real_prefix")
+        or bool(os.environ.get("CONDA_PREFIX"))
+    )
+    if not in_managed_environment:
+        command.append("--user")
+    command.append(ZPH_SOURCE_ARCHIVE)
+    return command
+
+
+def cmd_upgrade() -> None:
+    command = pip_upgrade_command()
+    rendered = " ".join(shlex.quote(part) for part in command)
+    print("Upgrading zph with the Python environment that runs this command:")
+    print(f"  {rendered}")
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as error:
+        raise WorkspaceError(
+            "Upgrade failed. You can retry it manually with:\n" f"  {rendered}"
+        ) from error
+    print("zph upgraded successfully. The new version will be used on the next invocation.")
 
 
 def git_commit(directory: Path) -> str | None:
@@ -1689,7 +1720,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zph", description="Zephyr client for Alamo runs")
     result.add_argument("--version", action="version", version=f"zph {__version__}")
-    commands = result.add_subparsers(dest="subcommand", required=True)
+    result.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="upgrade zph in its current Python environment and exit",
+    )
+    commands = result.add_subparsers(dest="subcommand")
 
     login = commands.add_parser("login", help="save and verify server credentials")
     login.add_argument("server")
@@ -1800,7 +1836,19 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = parser().parse_args(argv)
+    argument_parser = parser()
+    args = argument_parser.parse_args(argv)
+    if args.upgrade:
+        if args.subcommand:
+            argument_parser.error("--upgrade cannot be combined with a command")
+        try:
+            cmd_upgrade()
+        except (ApiError, ConfigError, WorkspaceError, OSError) as error:
+            print(f"zph: {error}", file=sys.stderr)
+            raise SystemExit(1) from error
+        return
+    if not args.subcommand:
+        argument_parser.error("a command is required (or use --upgrade)")
     if getattr(args, "command", None) and args.command[0] == "--":
         args.command = args.command[1:]
     try:

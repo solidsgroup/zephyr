@@ -5,7 +5,9 @@
 library.
 
 ```console
-pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
+python3 -m pip install --user --upgrade \
+  'https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli'
+export PATH="$HOME/.local/bin:$PATH"
 zph login https://zephyr.solids.group
 zph import .
 zph add /scratch/alamo-results
@@ -17,9 +19,17 @@ zph put output/myfile.png
 zph get output.481516
 ```
 
-On a cluster without `pipx`, recent packaging tools, or internet access from
-compute nodes, clone or copy the repository once and build a self-contained
-executable using only the Python standard library:
+The archive install does not require `pipx` or `git`. Omit `--user` when using
+an activated virtual or Conda environment. Future upgrades use the same Python
+environment automatically:
+
+```console
+zph --upgrade
+```
+
+On a cluster without usable packaging tools or internet access from compute
+nodes, clone or copy the repository once and build a self-contained executable
+using only the Python standard library:
 
 ```console
 python3 cli/install.py --prefix "$HOME/.local"
@@ -30,6 +40,8 @@ zph --version
 The resulting `~/.local/bin/zph` is a single zip application. It can be copied
 to another machine with the same or a newer Python interpreter; it does not
 need a virtual environment, `pip`, `setuptools`, or `wheel`.
+Running `zph --upgrade` from that installation requires `pip` on the login node
+and transitions it to the regular user installation above.
 
 Login uses a short-lived browser link. If a browser cannot be opened on the
 machine running `zph`, copy the printed URL to any browser, sign in, and return

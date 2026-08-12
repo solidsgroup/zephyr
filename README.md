@@ -36,13 +36,19 @@ HTTP/JSON contract under `/api/v1`.
 Install the CLI and connect once:
 
 ```console
-pipx install 'git+https://github.com/solidsgroup/zephyr.git#subdirectory=cli'
+python3 -m pip install --user --upgrade \
+  'https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli'
+export PATH="$HOME/.local/bin:$PATH"
 zph login https://zephyr.solids.group
 ```
 
-The CLI supports Python 3.7+ and has no runtime dependencies. On restricted
-clusters, `python3 cli/install.py` produces a single `~/.local/bin/zph`
-executable without using `pip`, `pipx`, `setuptools`, or `wheel`.
+This regular-pip installation is suitable for clusters and does not require
+`pipx` or `git`. Omit `--user` inside an activated virtual or Conda environment.
+After the one-time installation above, update from the command line with
+`zph --upgrade`. The CLI supports Python 3.7+ and has no runtime dependencies.
+On a cluster without usable packaging tools, `python3 cli/install.py` produces
+a single `~/.local/bin/zph` executable without using `pip`, `pipx`, `setuptools`,
+or `wheel`; `zph --upgrade` can later replace it with the regular-pip install.
 
 `zph` prints a ten-minute browser link and tries to open it automatically. Sign
 in with Google in the browser; the terminal receives and stores a revocable CLI
