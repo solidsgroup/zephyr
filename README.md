@@ -100,15 +100,18 @@ Upload and restore results:
 ```console
 zph put '*.png' 'profiles/*.csv'
 zph put output/myfile.png
+zph put 'output/images/**/*.png'
 zph list --status running
 zph compare HASH_A HASH_B
 zph get output.481516
 ```
 
-By default, `zph put` associates each file with the `metadata` file in that
-file's directory. Files from several output directories can be supplied in one
-command and are grouped by run automatically. Use `--directory RUN_DIRECTORY`
-to explicitly associate every target with a single run instead.
+By default, `zph put` walks upward from each file and associates it with the
+nearest `metadata` file. This supports artifacts in subfolders while preserving
+their run-relative paths. Files from several output directories can be supplied
+in one command and are grouped by run automatically. Use
+`--directory RUN_DIRECTORY` to explicitly associate every target with a single
+run instead.
 
 `zph get` accepts an output-directory name, HASH, or Zephyr UID. It restores to
 the original output-directory name by default. If that name identifies several

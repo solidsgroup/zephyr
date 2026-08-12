@@ -78,10 +78,12 @@ copy is moved. Set `ZEPHYR_SITE` to a stable cluster or filesystem name if the
 hostname is too specific; `SLURM_CLUSTER_NAME` is used automatically when
 available.
 
-`zph put` looks for `metadata` beside each target file. Thus
-`zph put output/myfile.png` automatically selects the run described by
-`output/metadata`, and files from multiple run directories can be uploaded in
-one command. Pass `--directory RUN_DIRECTORY` to override this association.
+`zph put` walks upward from each target file and uses the nearest `metadata`.
+Thus both `zph put output/myfile.png` and
+`zph put 'output/images/**/*.png'` select the run described by
+`output/metadata`; nested paths such as `images/frames/result.png` are retained
+in Zephyr. Files from multiple run directories can be uploaded in one command.
+Pass `--directory RUN_DIRECTORY` to override this association.
 
 `zph get` accepts an output-directory name, HASH, or Zephyr UID and preserves
 the recorded output-directory name by default. Ambiguous names open a numbered

@@ -47,7 +47,7 @@ def write_run(directory: Path, alamo_hash: str, filename: str) -> Path:
     return artifact
 
 
-def test_put_uses_metadata_beside_each_target(
+def test_put_uses_metadata_for_each_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -113,3 +113,37 @@ def test_put_directory_option_overrides_target_directory(
     )
     assert isinstance(completion, dict)
     assert completion["path"] == "images/result.png"
+
+
+def test_put_finds_metadata_above_nested_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifact = write_run(
+        tmp_path / "output",
+        "hash-root",
+        "images/frames/result.png",
+    )
+    client = FakeArtifactClient()
+    monkeypatch.setattr(main, "configured_client", lambda: client)
+
+    main.cmd_put(
+        argparse.Namespace(
+            paths=[str(artifact)],
+            directory=None,
+        )
+    )
+
+    completion = next(
+        payload
+        for method, path, payload, _ in client.requests
+        if method == "POST" and path.endswith("/artifacts/complete")
+    )
+    assert isinstance(completion, dict)
+    assert completion["path"] == "images/frames/result.png"
+    assert any(
+        method == "GET"
+        and path == "/runs"
+        and dict(query or []).get("search") == "hash-root"
+        for method, path, _, query in client.requests
+    )

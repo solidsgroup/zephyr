@@ -1479,6 +1479,17 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def artifact_run_directory(path: Path) -> Path:
+    """Return the nearest ancestor that contains Alamo metadata."""
+    directory = path.parent.resolve()
+    for candidate in (directory, *directory.parents):
+        if (candidate / "metadata").is_file():
+            return candidate
+    raise WorkspaceError(
+        f"No Alamo metadata found beside or above artifact {path}"
+    )
+
+
 def cmd_put(args: argparse.Namespace) -> None:
     paths = expanded_paths(args.paths)
     if not paths:
@@ -1487,7 +1498,7 @@ def cmd_put(args: argparse.Namespace) -> None:
     override = Path(args.directory).resolve() if args.directory else None
     grouped: dict[Path, list[Path]] = {}
     for path in paths:
-        directory = override or path.parent
+        directory = override or artifact_run_directory(path)
         grouped.setdefault(directory, []).append(path)
 
     # Validate every local association before creating or uploading any records.
@@ -1971,12 +1982,12 @@ def parser() -> argparse.ArgumentParser:
 
     put = commands.add_parser(
         "put",
-        help="upload artifacts using the metadata beside each file",
+        help="upload artifacts using the nearest metadata at or above each file",
     )
     put.add_argument("paths", nargs="+")
     put.add_argument(
         "--directory",
-        help="use this run directory for every file instead of each file's directory",
+        help="use this run directory for every file instead of searching its ancestors",
     )
     put.set_defaults(handler=cmd_put)
 
