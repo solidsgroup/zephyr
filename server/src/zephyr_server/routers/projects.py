@@ -3,24 +3,30 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..dependencies import current_user
-from ..models import Project, ProjectMembership, Run, RunProject, User
+from ..models import Project, ProjectFolder, ProjectMembership, Run, RunProject, User
 from ..schemas import (
     ProjectCreate,
+    ProjectFolderCreate,
+    ProjectFolderRead,
+    ProjectFolderUpdate,
+    ProjectLayoutRead,
     ProjectMemberAdd,
     ProjectMemberRead,
     ProjectRead,
     ProjectRunAdd,
     ProjectRunBatchAdd,
     ProjectRunBatchResult,
+    ProjectRunPlacementRead,
+    ProjectRunPlacementWrite,
     ProjectUpdate,
 )
-from .runs import run_read
+from .runs import artifact_previews_for_runs, run_read
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -41,6 +47,67 @@ async def accessible_project(db: AsyncSession, user: User, project_id: uuid.UUID
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+async def editable_project(db: AsyncSession, user: User, project_id: uuid.UUID) -> Project:
+    project = await accessible_project(db, user, project_id)
+    if project.owner_id == user.id:
+        return project
+    membership = await db.scalar(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project.id,
+            ProjectMembership.user_id == user.id,
+            ProjectMembership.role.in_({"owner", "editor"}),
+        )
+    )
+    if membership is None:
+        raise HTTPException(status_code=403, detail="Project edit access required")
+    return project
+
+
+async def project_folder(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    folder_id: uuid.UUID,
+) -> ProjectFolder:
+    folder = await db.get(ProjectFolder, folder_id)
+    if folder is None or folder.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Project folder not found")
+    return folder
+
+
+async def validate_parent_folder(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    folder_id: uuid.UUID | None = None,
+) -> None:
+    seen: set[uuid.UUID] = set()
+    current_id = parent_id
+    while current_id is not None:
+        if current_id == folder_id or current_id in seen:
+            raise HTTPException(status_code=422, detail="Folders cannot contain themselves")
+        seen.add(current_id)
+        current = await project_folder(db, project_id, current_id)
+        current_id = current.parent_id
+
+
+async def ensure_unique_folder_name(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    name: str,
+    folder_id: uuid.UUID | None = None,
+) -> None:
+    query = select(ProjectFolder.id).where(
+        ProjectFolder.project_id == project_id,
+        ProjectFolder.parent_id == parent_id,
+        func.lower(ProjectFolder.name) == name.lower(),
+    )
+    if folder_id is not None:
+        query = query.where(ProjectFolder.id != folder_id)
+    if await db.scalar(query):
+        raise HTTPException(status_code=409, detail="A folder with this name already exists here")
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -106,6 +173,125 @@ async def delete_project(
     if project is None or project.owner_id != user.id:
         raise HTTPException(status_code=404, detail="Owned project not found")
     await db.delete(project)
+    await db.commit()
+
+
+@router.get("/{project_id}/layout", response_model=ProjectLayoutRead)
+async def project_layout(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectLayoutRead:
+    project = await accessible_project(db, user, project_id)
+    folders = list(
+        await db.scalars(
+            select(ProjectFolder)
+            .where(ProjectFolder.project_id == project.id)
+            .order_by(ProjectFolder.position, ProjectFolder.name)
+        )
+    )
+    rows = (
+        await db.execute(
+            select(Run, RunProject)
+            .join(RunProject, RunProject.run_id == Run.id)
+            .where(RunProject.project_id == project.id)
+            .order_by(RunProject.position, Run.name)
+        )
+    ).all()
+    runs = [run for run, _ in rows]
+    previews = await artifact_previews_for_runs(db, runs)
+    return ProjectLayoutRead(
+        folders=[ProjectFolderRead.model_validate(folder) for folder in folders],
+        runs=[
+            ProjectRunPlacementRead(
+                run=run_read(run, *previews.get(run.id, (0, []))),
+                folder_id=link.folder_id,
+                position=link.position,
+            )
+            for run, link in rows
+        ],
+    )
+
+
+@router.post(
+    "/{project_id}/folders",
+    response_model=ProjectFolderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_folder(
+    project_id: uuid.UUID,
+    payload: ProjectFolderCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project = await editable_project(db, user, project_id)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Folder name cannot be blank")
+    await validate_parent_folder(db, project.id, payload.parent_id)
+    await ensure_unique_folder_name(db, project.id, payload.parent_id, name)
+    last_position = await db.scalar(
+        select(func.coalesce(func.max(ProjectFolder.position), -1)).where(
+            ProjectFolder.project_id == project.id,
+            ProjectFolder.parent_id == payload.parent_id,
+        )
+    )
+    position = (last_position if last_position is not None else -1) + 1
+    folder = ProjectFolder(
+        project_id=project.id,
+        parent_id=payload.parent_id,
+        name=name,
+        position=position,
+    )
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return folder
+
+
+@router.patch("/{project_id}/folders/{folder_id}", response_model=ProjectFolderRead)
+async def update_folder(
+    project_id: uuid.UUID,
+    folder_id: uuid.UUID,
+    payload: ProjectFolderUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project = await editable_project(db, user, project_id)
+    folder = await project_folder(db, project.id, folder_id)
+    parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else folder.parent_id
+    name = payload.name.strip() if payload.name is not None else folder.name
+    if not name:
+        raise HTTPException(status_code=422, detail="Folder name cannot be blank")
+    await validate_parent_folder(db, project.id, parent_id, folder.id)
+    await ensure_unique_folder_name(db, project.id, parent_id, name, folder.id)
+    folder.parent_id = parent_id
+    folder.name = name
+    if payload.position is not None:
+        folder.position = payload.position
+    await db.commit()
+    await db.refresh(folder)
+    return folder
+
+
+@router.delete("/{project_id}/folders/{folder_id}", status_code=204)
+async def delete_folder(
+    project_id: uuid.UUID,
+    folder_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project = await editable_project(db, user, project_id)
+    folder = await project_folder(db, project.id, folder_id)
+    has_children = await db.scalar(
+        select(ProjectFolder.id).where(ProjectFolder.parent_id == folder.id).limit(1)
+    )
+    has_runs = await db.scalar(
+        select(RunProject.run_id).where(RunProject.folder_id == folder.id).limit(1)
+    )
+    if has_children or has_runs:
+        raise HTTPException(status_code=409, detail="Only empty folders can be deleted")
+    await db.delete(folder)
     await db.commit()
 
 
@@ -210,21 +396,20 @@ async def add_run(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project = await accessible_project(db, user, project_id)
-    if project.owner_id != user.id:
-        membership = await db.scalar(
-            select(ProjectMembership).where(
-                ProjectMembership.project_id == project.id,
-                ProjectMembership.user_id == user.id,
-            )
-        )
-        if membership is None or membership.role not in {"owner", "editor"}:
-            raise HTTPException(status_code=403, detail="Project edit access required")
+    project = await editable_project(db, user, project_id)
+    if payload.folder_id is not None:
+        await project_folder(db, project.id, payload.folder_id)
     run = await db.get(Run, payload.run_id)
     if run is None or run.owner_id != user.id:
         raise HTTPException(status_code=404, detail="Owned run not found")
     if await db.get(RunProject, (run.id, project.id)) is None:
-        db.add(RunProject(run_id=run.id, project_id=project.id))
+        db.add(
+            RunProject(
+                run_id=run.id,
+                project_id=project.id,
+                folder_id=payload.folder_id,
+            )
+        )
         await db.commit()
 
 
@@ -235,17 +420,9 @@ async def add_runs_batch(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectRunBatchResult:
-    project = await accessible_project(db, user, project_id)
-    if project.owner_id != user.id:
-        membership = await db.scalar(
-            select(ProjectMembership).where(
-                ProjectMembership.project_id == project.id,
-                ProjectMembership.user_id == user.id,
-                ProjectMembership.role.in_({"owner", "editor"}),
-            )
-        )
-        if membership is None:
-            raise HTTPException(status_code=403, detail="Project edit access required")
+    project = await editable_project(db, user, project_id)
+    if payload.folder_id is not None:
+        await project_folder(db, project.id, payload.folder_id)
 
     run_ids = set(payload.run_ids)
     owned_run_ids = set(
@@ -263,7 +440,14 @@ async def add_runs_batch(
         )
     )
     new_ids = run_ids - existing_ids
-    db.add_all(RunProject(run_id=run_id, project_id=project.id) for run_id in new_ids)
+    db.add_all(
+        RunProject(
+            run_id=run_id,
+            project_id=project.id,
+            folder_id=payload.folder_id,
+        )
+        for run_id in new_ids
+    )
     if new_ids:
         await db.commit()
     return ProjectRunBatchResult(added=len(new_ids), already_present=len(existing_ids))
@@ -284,7 +468,38 @@ async def list_project_runs(
             .order_by(Run.updated_at.desc())
         )
     )
-    return [run_read(run) for run in runs]
+    previews = await artifact_previews_for_runs(db, runs)
+    return [run_read(run, *previews.get(run.id, (0, []))) for run in runs]
+
+
+@router.put(
+    "/{project_id}/runs/{run_id}/placement",
+    response_model=ProjectRunPlacementRead,
+)
+async def place_run(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    payload: ProjectRunPlacementWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectRunPlacementRead:
+    project = await editable_project(db, user, project_id)
+    if payload.folder_id is not None:
+        await project_folder(db, project.id, payload.folder_id)
+    link = await db.get(RunProject, (run_id, project.id))
+    if link is None:
+        raise HTTPException(status_code=404, detail="Run is not in this project")
+    run = await db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    link.folder_id = payload.folder_id
+    link.position = payload.position
+    await db.commit()
+    return ProjectRunPlacementRead(
+        run=run_read(run),
+        folder_id=link.folder_id,
+        position=link.position,
+    )
 
 
 @router.delete("/{project_id}/runs/{run_id}", status_code=204)

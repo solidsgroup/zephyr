@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
 import JobsPage from "./pages/JobsPage";
+import ProjectsPage from "./pages/ProjectsPage";
 import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
 import type { Artifact, Run, RunCopy } from "./types";
 
@@ -167,6 +168,59 @@ describe("RunBrowser", () => {
         && url.includes("site=stampede3")
         && url.includes("has_thumbnail=true"),
       )).toBe(true);
+    });
+  });
+});
+
+describe("ProjectsPage", () => {
+  it("shows nested folders and moves a run by drag and drop", async () => {
+    const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
+    const projectRun = run("simulation", "Simulation one");
+    const layout = {
+      folders: [
+        { id: "cases", project_id: "project", parent_id: null, name: "Cases", position: 0 },
+        { id: "gpu", project_id: "project", parent_id: "cases", name: "GPU", position: 0 },
+      ],
+      runs: [{ run: projectRun, folder_id: null, position: 0 }],
+    };
+    const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
+      const url = String(request);
+      let body: unknown = [];
+      if (url.includes("/auth/me")) {
+        body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
+      } else if (url.includes("/projects/project/runs/simulation/placement")) {
+        body = { run: projectRun, folder_id: "gpu", position: 0 };
+      } else if (url.includes("/projects/project/layout")) {
+        body = layout;
+      } else if (url.includes("/projects")) {
+        body = [project];
+      }
+      return Promise.resolve(new Response(JSON.stringify(body), { status: options?.method === "DELETE" ? 204 : 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["me"], { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null });
+
+    const view = render(<QueryClientProvider client={queryClient}><ProjectsPage /></QueryClientProvider>);
+    const page = within(view.container);
+    expect(await page.findByRole("combobox", { name: "Select project" })).toHaveValue("project");
+    const casesButton = (await page.findByText("Cases")).closest("button")!;
+    expect(page.getByText("GPU")).toBeInTheDocument();
+    fireEvent.click(casesButton);
+    expect(page.queryByText("GPU")).not.toBeInTheDocument();
+    fireEvent.click(casesButton);
+
+    const runButton = page.getAllByText("Simulation one")[0].closest("button")!;
+    const gpuDropTarget = page.getByText("GPU").closest(".project-folder-row")!;
+    const transfer = { effectAllowed: "none", dropEffect: "none", setData: vi.fn(), getData: vi.fn(() => "simulation") };
+    fireEvent.dragStart(runButton, { dataTransfer: transfer });
+    fireEvent.dragOver(gpuDropTarget, { dataTransfer: transfer });
+    fireEvent.drop(gpuDropTarget, { dataTransfer: transfer });
+
+    await waitFor(() => {
+      const placementCall = fetchMock.mock.calls.find(([request]) => String(request).includes("/placement"));
+      expect(placementCall).toBeDefined();
+      expect(JSON.parse(String(placementCall?.[1]?.body))).toEqual({ folder_id: "gpu", position: 0 });
     });
   });
 });

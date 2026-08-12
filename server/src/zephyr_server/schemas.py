@@ -321,15 +321,53 @@ class ProjectMemberRead(BaseModel):
 
 class ProjectRunAdd(BaseModel):
     run_id: uuid.UUID
+    folder_id: uuid.UUID | None = None
 
 
 class ProjectRunBatchAdd(BaseModel):
     run_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+    folder_id: uuid.UUID | None = None
 
 
 class ProjectRunBatchResult(BaseModel):
     added: int
     already_present: int
+
+
+class ProjectFolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    parent_id: uuid.UUID | None = None
+
+
+class ProjectFolderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    parent_id: uuid.UUID | None = None
+    position: int | None = Field(default=None, ge=0)
+
+
+class ProjectFolderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    project_id: uuid.UUID
+    parent_id: uuid.UUID | None
+    name: str
+    position: int
+
+
+class ProjectRunPlacementWrite(BaseModel):
+    folder_id: uuid.UUID | None = None
+    position: int = Field(default=0, ge=0)
+
+
+class ProjectRunPlacementRead(BaseModel):
+    run: RunRead
+    folder_id: uuid.UUID | None
+    position: int
+
+
+class ProjectLayoutRead(BaseModel):
+    folders: list[ProjectFolderRead]
+    runs: list[ProjectRunPlacementRead]
 
 
 class PlotRecipeWrite(BaseModel):

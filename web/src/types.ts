@@ -123,6 +123,25 @@ export interface Project {
   visibility: "private" | "group" | "public";
 }
 
+export interface ProjectFolder {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  name: string;
+  position: number;
+}
+
+export interface ProjectRunPlacement {
+  run: Run;
+  folder_id: string | null;
+  position: number;
+}
+
+export interface ProjectLayout {
+  folders: ProjectFolder[];
+  runs: ProjectRunPlacement[];
+}
+
 export interface ApiToken {
   id: string;
   name: string;

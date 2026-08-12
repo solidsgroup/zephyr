@@ -181,6 +181,19 @@ class RunSearch(Base):
     document: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
+class ProjectFolder(TimestampMixin, Base):
+    __tablename__ = "project_folders"
+    __table_args__ = (Index("ix_project_folders_project_parent", "project_id", "parent_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("project_folders.id", ondelete="SET NULL")
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class RunProject(Base):
     __tablename__ = "run_projects"
 
@@ -190,6 +203,10 @@ class RunProject(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
     )
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("project_folders.id", ondelete="SET NULL"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class RunMetadata(TimestampMixin, Base):

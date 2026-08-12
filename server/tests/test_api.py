@@ -298,6 +298,39 @@ async def test_run_lifecycle_and_public_project() -> None:
             project_runs = await client.get(f"/api/v1/projects/{project_id}/runs")
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
 
+            cases_folder = await client.post(
+                f"/api/v1/projects/{project_id}/folders",
+                json={"name": "Cases"},
+                headers=headers,
+            )
+            assert cases_folder.status_code == 201
+            cases_folder_id = cases_folder.json()["id"]
+            gpu_folder = await client.post(
+                f"/api/v1/projects/{project_id}/folders",
+                json={"name": "GPU", "parent_id": cases_folder_id},
+                headers=headers,
+            )
+            assert gpu_folder.status_code == 201
+            gpu_folder_id = gpu_folder.json()["id"]
+            placed = await client.put(
+                f"/api/v1/projects/{project_id}/runs/{run_id}/placement",
+                json={"folder_id": gpu_folder_id, "position": 2},
+                headers=headers,
+            )
+            assert placed.status_code == 200
+            assert placed.json()["folder_id"] == gpu_folder_id
+            assert placed.json()["position"] == 2
+            layout = await client.get(f"/api/v1/projects/{project_id}/layout")
+            assert {folder["name"] for folder in layout.json()["folders"]} == {"Cases", "GPU"}
+            placement = next(item for item in layout.json()["runs"] if item["run"]["id"] == run_id)
+            assert placement["folder_id"] == gpu_folder_id
+            cycle = await client.patch(
+                f"/api/v1/projects/{project_id}/folders/{cases_folder_id}",
+                json={"parent_id": gpu_folder_id},
+                headers=headers,
+            )
+            assert cycle.status_code == 422
+
             public = await client.get("/api/v1/public/projects/rm-study")
             assert public.status_code == 200
             assert {item["id"] for item in public.json()["runs"]} == {run_id, batch_run_id}
