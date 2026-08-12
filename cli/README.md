@@ -6,7 +6,7 @@ library.
 
 ```console
 python3 -m pip install --user --upgrade \
-  'https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli'
+  'https://zephyr.solids.group/downloads/zph-latest.tar.gz'
 export PATH="$HOME/.local/bin:$PATH"
 zph login https://zephyr.solids.group
 zph import .
@@ -19,9 +19,9 @@ zph put output/myfile.png
 zph get output.481516
 ```
 
-The archive install does not require `pipx` or `git`. Omit `--user` when using
-an activated virtual or Conda environment. Future upgrades use the same Python
-environment automatically:
+The distribution is served by Zephyr itself and does not require cluster access
+to GitHub, `pipx`, or `git`. Omit `--user` when using an activated virtual or
+Conda environment. Future upgrades use the same Python environment automatically:
 
 ```console
 zph --upgrade

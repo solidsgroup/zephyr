@@ -7,7 +7,6 @@
 **/.pytest_cache
 **/.ruff_cache
 **/.mypy_cache
-cli
 docs
 protocol
 server/tests

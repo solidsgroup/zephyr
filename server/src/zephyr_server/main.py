@@ -50,6 +50,7 @@ async def protocol_metadata() -> dict[str, object]:
         "protocol": "1.0",
         "minimum_client": "0.1.0",
         "maximum_client": "0.x",
+        "cli_distribution": f"{settings.public_url.rstrip('/')}/downloads/zph-latest.tar.gz",
         "development_login": settings.dev_auth and settings.env != "production",
         "capabilities": [
             "runs",
@@ -58,6 +59,7 @@ async def protocol_metadata() -> dict[str, object]:
             "bulk-sync-state",
             "copy-locations",
             "bulk-copy-locations",
+            "cli-distribution",
             "scheduler-context",
             "thermo-segments",
             "artifacts",
@@ -85,6 +87,21 @@ for api_router in (
 
 
 static_dir = settings.static_dir
+
+
+@app.get("/downloads/zph-latest.tar.gz", include_in_schema=False)
+async def download_zph_distribution():
+    distribution = static_dir / "downloads" / "zph-latest.tar.gz" if static_dir else None
+    if distribution is None or not distribution.is_file():
+        raise HTTPException(status_code=404, detail="zph distribution is unavailable")
+    return FileResponse(
+        distribution,
+        media_type="application/gzip",
+        filename="zph-latest.tar.gz",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 if static_dir and static_dir.exists():
     served_static_dir: Path = static_dir
     assets = served_static_dir / "assets"

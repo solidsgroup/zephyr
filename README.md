@@ -37,13 +37,14 @@ Install the CLI and connect once:
 
 ```console
 python3 -m pip install --user --upgrade \
-  'https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli'
+  'https://zephyr.solids.group/downloads/zph-latest.tar.gz'
 export PATH="$HOME/.local/bin:$PATH"
 zph login https://zephyr.solids.group
 ```
 
-This regular-pip installation is suitable for clusters and does not require
-`pipx` or `git`. Omit `--user` inside an activated virtual or Conda environment.
+This regular-pip installation is served by Zephyr itself so clusters do not
+need outbound access to GitHub, `pipx`, or `git`. Omit `--user` inside an
+activated virtual or Conda environment.
 After the one-time installation above, update from the command line with
 `zph --upgrade`. The CLI supports Python 3.7+ and has no runtime dependencies.
 On a cluster without usable packaging tools, `python3 cli/install.py` produces

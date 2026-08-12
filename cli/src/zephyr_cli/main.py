@@ -90,9 +90,7 @@ SLURM_DETAIL_ENVIRONMENT = {
 }
 SYNCED_METADATA_DIGESTS: dict[str, str] = {}
 SYNCED_OUTPUT_DIGESTS: dict[tuple[str, str], str] = {}
-ZPH_SOURCE_ARCHIVE = (
-    "https://github.com/solidsgroup/zephyr/archive/refs/heads/master.zip#subdirectory=cli"
-)
+ZPH_SOURCE_ARCHIVE = "https://zephyr.solids.group/downloads/zph-latest.tar.gz"
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"

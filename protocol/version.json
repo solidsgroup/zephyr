@@ -9,6 +9,7 @@
     "bulk-sync-state",
     "copy-locations",
     "bulk-copy-locations",
+    "cli-distribution",
     "scheduler-context",
     "thermo-segments",
     "artifacts",

@@ -1,4 +1,7 @@
 import subprocess
+import sys
+import tarfile
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +35,7 @@ def test_upgrade_uses_user_install_for_system_python(
     ]
     assert "--user" in command
     assert command[-1] == main.ZPH_SOURCE_ARCHIVE
+    assert command[-1] == "https://zephyr.solids.group/downloads/zph-latest.tar.gz"
 
 
 def test_upgrade_does_not_use_user_install_in_virtual_environment(
@@ -74,3 +78,18 @@ def test_main_dispatches_upgrade_without_a_command(monkeypatch: pytest.MonkeyPat
     main.main(["--upgrade"])
 
     assert calls == [True]
+
+
+def test_cluster_distribution_contains_an_installable_package(tmp_path: Path) -> None:
+    cli_root = Path(__file__).resolve().parents[1]
+    distribution = tmp_path / "zph-latest.tar.gz"
+
+    subprocess.run(
+        [sys.executable, str(cli_root / "build_sdist.py"), str(distribution)],
+        check=True,
+    )
+
+    with tarfile.open(distribution, "r:gz") as archive:
+        names = set(archive.getnames())
+    assert "zph-0.5.3/setup.py" in names
+    assert "zph-0.5.3/src/zephyr_cli/main.py" in names
