@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
 import JobsPage from "./pages/JobsPage";
-import { CopyLocations, SlurmDetails } from "./pages/RunPage";
-import type { Run, RunCopy } from "./types";
+import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
+import type { Artifact, Run, RunCopy } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -56,7 +56,7 @@ describe("ArtifactStack", () => {
       artifact_previews: [
         { id: "selected", logical_name: "temperature.png", path: "temperature.png", kind: "image", content_type: "image/png", download_url: "/temperature.png" },
         { id: "other", logical_name: "pressure.png", path: "pressure.png", kind: "image", content_type: "image/png", download_url: "/pressure.png" },
-        { id: "log", logical_name: "solver.log", path: "solver.log", kind: "log", content_type: "text/plain", download_url: null },
+        { id: "movie", logical_name: "movie.webm", path: "movie.webm", kind: "file", content_type: "video/webm", download_url: "/movie.webm" },
       ],
     } as Run;
 
@@ -64,7 +64,32 @@ describe("ArtifactStack", () => {
 
     expect(screen.getByLabelText("4 artifacts")).toBeInTheDocument();
     expect(screen.getByAltText("temperature.png")).toBeInTheDocument();
+    expect(screen.getByLabelText("movie.webm")).toHaveAttribute("src", "/movie.webm");
     expect(screen.getByText("+1")).toBeInTheDocument();
+  });
+});
+
+describe("ArtifactViewer", () => {
+  it("opens WebM media fullscreen and closes with Escape", () => {
+    const close = vi.fn();
+    const artifact = {
+      id: "movie",
+      sha256: "a".repeat(64),
+      size: 100,
+      content_type: "video/webm",
+      logical_name: "movie.webm",
+      path: "movies/movie.webm",
+      version: 1,
+      kind: "file",
+      attributes: {},
+      derivation: {},
+      download_url: "/movie.webm",
+    } as Artifact;
+    const view = render(<ArtifactViewer artifact={artifact} url="/movie.webm" onClose={close} />);
+    expect(within(view.container).getByRole("dialog", { name: "Preview movie.webm" })).toBeInTheDocument();
+    expect(within(view.container).getByLabelText("movie.webm")).toHaveAttribute("controls");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 
@@ -74,6 +99,10 @@ describe("RunBrowser", () => {
     vi.stubGlobal("fetch", vi.fn((request: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify(
       String(request).includes("/runs/facets")
         ? { sites: [{ site: "stampede3", run_count: 2 }] }
+        : String(request).includes("/projects?")
+          ? [{ id: "project", owner_id: "owner", slug: "study", name: "Study", description: "", visibility: "private" }]
+          : String(request).includes("/runs/batch")
+            ? { added: 2, already_present: 0 }
         : runs,
     ), {
       status: 200,
@@ -81,20 +110,26 @@ describe("RunBrowser", () => {
     }))));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    render(
+    const view = render(
       <QueryClientProvider client={queryClient}>
         <RunBrowser open onClose={() => undefined} />
       </QueryClientProvider>,
     );
 
-    const first = await screen.findByRole("link", { name: "Run one" });
-    const second = screen.getByRole("link", { name: "Run two" });
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    const browser = within(view.container);
+    const first = await browser.findByRole("link", { name: "Run one" });
+    const second = browser.getByRole("link", { name: "Run two" });
+    expect(browser.queryByRole("checkbox")).not.toBeInTheDocument();
 
     fireEvent.click(first, { ctrlKey: true });
-    expect(screen.getByText("Ctrl/Cmd-click another run to compare")).toBeInTheDocument();
+    expect(browser.getByText("Ctrl/Cmd-click another run to compare")).toBeInTheDocument();
     fireEvent.click(second, { ctrlKey: true });
-    expect(screen.getByRole("button", { name: "Compare 2 runs" })).toBeInTheDocument();
+    expect(browser.getByRole("button", { name: "Compare 2" })).toBeInTheDocument();
+    fireEvent.click(browser.getByRole("button", { name: "Add to project" }));
+    const project = await browser.findByRole("option", { name: "Study" });
+    fireEvent.change(project.closest("select")!, { target: { value: "project" } });
+    fireEvent.click(browser.getByRole("button", { name: "Add runs" }));
+    expect(await browser.findByText("Added 2 to Study")).toBeInTheDocument();
     expect(first.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
     expect(second.closest(".run-browser-item")).toHaveAttribute("data-selected", "true");
   });

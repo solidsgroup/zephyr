@@ -99,8 +99,9 @@ def run_read(
     return RunRead.model_validate(data)
 
 
-def is_preview_image(record: RunArtifact) -> bool:
-    return record.kind == "image" and record.object.content_type.startswith("image/")
+def is_preview_media(record: RunArtifact) -> bool:
+    content_type = record.object.content_type.lower().split(";", 1)[0].strip()
+    return content_type.startswith("image/") or content_type.startswith("video/")
 
 
 def artifact_preview(record: RunArtifact) -> ArtifactPreview:
@@ -112,7 +113,7 @@ def artifact_preview(record: RunArtifact) -> ArtifactPreview:
         content_type=record.object.content_type,
         download_url=(
             f"/api/v1/runs/{record.run_id}/artifacts/{record.id}/content"
-            if is_preview_image(record)
+            if is_preview_media(record)
             else None
         ),
     )
@@ -174,7 +175,7 @@ async def artifact_previews_for_runs(
         records = by_run.get(run.id, [])
         records.sort(
             key=lambda record: (
-                not is_preview_image(record),
+                not is_preview_media(record),
                 -record.updated_at.timestamp(),
                 record.path,
             )
@@ -276,6 +277,15 @@ async def list_runs(
             .correlate(Run)
             .exists()
         )
+        metadata_match = (
+            select(RunMetadata.run_id)
+            .where(
+                RunMetadata.run_id == Run.id,
+                RunMetadata.raw_text.ilike(pattern, escape="\\"),
+            )
+            .correlate(Run)
+            .exists()
+        )
         query = query.where(
             or_(
                 Run.name.ilike(pattern, escape="\\"),
@@ -286,6 +296,7 @@ async def list_runs(
                 Run.git_commit.ilike(pattern, escape="\\"),
                 copy_match,
                 artifact_match,
+                metadata_match,
             )
         )
     if has_thumbnail is not None:
@@ -439,9 +450,7 @@ async def get_run(
     )
     copies = list(
         await db.scalars(
-            select(RunCopy)
-            .where(RunCopy.run_id == run.id)
-            .order_by(RunCopy.updated_at.desc())
+            select(RunCopy).where(RunCopy.run_id == run.id).order_by(RunCopy.updated_at.desc())
         )
     )
     return {
@@ -471,9 +480,7 @@ async def list_run_copies(
     await get_accessible_run(db, user, run_id)
     return list(
         await db.scalars(
-            select(RunCopy)
-            .where(RunCopy.run_id == run_id)
-            .order_by(RunCopy.updated_at.desc())
+            select(RunCopy).where(RunCopy.run_id == run_id).order_by(RunCopy.updated_at.desc())
         )
     )
 
@@ -486,9 +493,7 @@ async def update_run_copies_batch(
 ) -> dict[str, int]:
     run_ids = {item.run_id for item in payload.copies}
     owned_run_ids = set(
-        await db.scalars(
-            select(Run.id).where(Run.id.in_(run_ids), Run.owner_id == user.id)
-        )
+        await db.scalars(select(Run.id).where(Run.id.in_(run_ids), Run.owner_id == user.id))
     )
     if owned_run_ids != run_ids:
         raise HTTPException(
@@ -496,9 +501,7 @@ async def update_run_copies_batch(
             detail="Only the owner can update copy locations",
         )
 
-    existing = list(
-        await db.scalars(select(RunCopy).where(RunCopy.run_id.in_(run_ids)))
-    )
+    existing = list(await db.scalars(select(RunCopy).where(RunCopy.run_id.in_(run_ids))))
     records = {(record.run_id, record.site, record.path): record for record in existing}
     for item in payload.copies:
         values = item.model_dump(exclude={"run_id"})
@@ -659,9 +662,7 @@ async def write_output(
     if "stdout" in values:
         record.stdout_digest = hashlib.sha256(values["stdout"].encode("utf-8")).hexdigest()
     if "git_diff" in values:
-        record.git_diff_digest = hashlib.sha256(
-            values["git_diff"].encode("utf-8")
-        ).hexdigest()
+        record.git_diff_digest = hashlib.sha256(values["git_diff"].encode("utf-8")).hexdigest()
     for key, value in values.items():
         setattr(record, key, value)
     await db.commit()

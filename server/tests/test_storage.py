@@ -36,6 +36,12 @@ def test_google_drive_upload_verify_and_download() -> None:
             assert metadata["appProperties"]["zephyr_sha256"] == digest
             return httpx.Response(200, headers={"Location": "https://upload.example/session"})
         if request.url.params.get("alt") == "media":
+            if request.headers.get("Range"):
+                return httpx.Response(
+                    206,
+                    content=b"artifact",
+                    headers={"Content-Range": "bytes 0-7/14", "Content-Length": "8"},
+                )
             return httpx.Response(200, content=b"artifact bytes")
         if request.url.path.endswith("/files/drive-file-123"):
             return httpx.Response(
@@ -64,7 +70,12 @@ def test_google_drive_upload_verify_and_download() -> None:
 
     storage.verify(target.object_key, digest, 14)
     assert b"".join(storage.open_download(target.object_key)) == b"artifact bytes"
-    assert len(requests) == 4
+    partial = storage.open_download_response(target.object_key, "bytes=0-7")
+    assert partial.status_code == 206
+    assert partial.headers["Content-Range"] == "bytes 0-7/14"
+    assert b"".join(partial.content) == b"artifact"
+    assert requests[-1].headers["Range"] == "bytes=0-7"
+    assert len(requests) == 5
 
 
 def test_google_drive_verification_rejects_wrong_size() -> None:

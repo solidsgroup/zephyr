@@ -64,6 +64,7 @@ async def protocol_metadata() -> dict[str, object]:
             "thermo-segments",
             "artifacts",
             "projects",
+            "bulk-project-runs",
             "project-sharing",
             "public-projects",
             "comparisons",

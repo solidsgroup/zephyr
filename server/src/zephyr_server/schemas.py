@@ -323,6 +323,15 @@ class ProjectRunAdd(BaseModel):
     run_id: uuid.UUID
 
 
+class ProjectRunBatchAdd(BaseModel):
+    run_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+
+
+class ProjectRunBatchResult(BaseModel):
+    added: int
+    already_present: int
+
+
 class PlotRecipeWrite(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     project_id: uuid.UUID | None = None

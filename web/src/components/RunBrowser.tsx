@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "../api";
-import type { Run, RunFacets } from "../types";
+import { isVideoContentType, isVisualContentType } from "../artifacts";
+import type { Project, Run, RunFacets } from "../types";
 import StatusPill from "./StatusPill";
 
 function age(value: string | null) {
@@ -34,8 +35,10 @@ export function ArtifactStack({ run }: { run: Run }) {
           style={{ "--stack-index": index } as CSSProperties}
           title={artifact.logical_name}
         >
-          {artifact.kind === "image" && artifact.download_url
-            ? <img loading="lazy" src={artifact.download_url} alt={artifact.logical_name} />
+          {artifact.download_url && isVideoContentType(artifact.content_type)
+            ? <video preload="metadata" autoPlay muted loop playsInline src={artifact.download_url} aria-label={artifact.logical_name} />
+            : artifact.download_url && isVisualContentType(artifact.content_type)
+              ? <img loading="lazy" src={artifact.download_url} alt={artifact.logical_name} />
             : <span>{artifactGlyph(artifact.kind)}</span>}
         </div>
       ))}
@@ -46,12 +49,16 @@ export function ArtifactStack({ run }: { run: Run }) {
 
 export default function RunBrowser({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [location, navigate] = useLocation();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState("");
   const [site, setSite] = useState("");
   const [thumbnail, setThumbnail] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [projectId, setProjectId] = useState("");
+  const [projectNotice, setProjectNotice] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQuery(search.trim()), 250);
     return () => window.clearTimeout(timer);
@@ -78,6 +85,24 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const data = runs.data ?? [];
   const sites = facets.data?.sites ?? [];
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+  const projects = useQuery({
+    queryKey: ["projects", "editable"],
+    queryFn: () => api<Project[]>("/projects?editable=true"),
+    enabled: selectedIds.length >= 2 && showProjectPicker,
+  });
+  const addToProject = useMutation({
+    mutationFn: () => api<{ added: number; already_present: number }>(`/projects/${projectId}/runs/batch`, {
+      method: "POST",
+      body: JSON.stringify({ run_ids: selectedIds }),
+    }),
+    onSuccess: (result) => {
+      const project = projects.data?.find((item) => item.id === projectId);
+      const existing = result.already_present ? `; ${result.already_present} already there` : "";
+      setProjectNotice(`Added ${result.added} to ${project?.name ?? "project"}${existing}`);
+      setShowProjectPicker(false);
+      queryClient.invalidateQueries({ queryKey: ["project-runs", projectId] });
+    },
+  });
 
   function chooseRun(event: MouseEvent<HTMLAnchorElement>, run: Run) {
     if (event.ctrlKey || event.metaKey) {
@@ -154,8 +179,24 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
         {!runs.isPending && !runs.isError && !data.length && <div className="run-browser-state">No runs match this view.</div>}
       </div>
       <footer className="run-browser-footer">
-        {selectedIds.length >= 2 ?
-          <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length} runs</button> :
+        {selectedIds.length >= 2 ? <>
+          {showProjectPicker && <div className="run-project-picker">
+            <strong>Add {selectedIds.length} runs to project</strong>
+            {projects.isPending ? <span>Loading projects…</span> : projects.data?.length ? <>
+              <select value={projectId} onChange={(event) => setProjectId(event.target.value)} aria-label="Choose project">
+                <option value="">Choose project…</option>
+                {projects.data.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+              </select>
+              <button className="button button-primary" disabled={!projectId || addToProject.isPending} onClick={() => addToProject.mutate()}>{addToProject.isPending ? "Adding…" : "Add runs"}</button>
+              {addToProject.isError && <span className="error-text">Could not add these runs.</span>}
+            </> : <span>No editable projects. <Link href="/projects">Create one</Link></span>}
+          </div>}
+          {projectNotice && !showProjectPicker && <span className="run-project-notice">{projectNotice}</span>}
+          <div className="run-selection-actions">
+            <button className="button" aria-expanded={showProjectPicker} onClick={() => { setShowProjectPicker((value) => !value); setProjectNotice(""); }}>Add to project</button>
+            <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length}</button>
+          </div>
+        </> :
           <span>{selectedIds.length === 1 ? "Ctrl/Cmd-click another run to compare" : "Ctrl/Cmd-click to select multiple runs"}</span>}
       </footer>
     </aside>

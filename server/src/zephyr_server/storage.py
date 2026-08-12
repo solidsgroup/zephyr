@@ -34,6 +34,13 @@ class UploadTarget:
     headers: dict[str, str]
 
 
+@dataclass(frozen=True)
+class DownloadStream:
+    content: Iterator[bytes]
+    status_code: int
+    headers: dict[str, str]
+
+
 class ServiceAccountTokenProvider:
     def __init__(self, credentials_json: str) -> None:
         try:
@@ -183,12 +190,17 @@ class GoogleDriveStorage:
         if drive_digest != sha256:
             raise StorageError("Google Drive artifact checksum does not match")
 
-    def open_download(self, object_key: str) -> Iterator[bytes]:
+    def open_download_response(
+        self,
+        object_key: str,
+        byte_range: str | None = None,
+    ) -> DownloadStream:
+        headers = self._headers({"Range": byte_range} if byte_range else None)
         request = self.client.build_request(
             "GET",
             f"{DRIVE_API}/files/{object_key}",
             params={"alt": "media", "supportsAllDrives": "true"},
-            headers=self._headers(),
+            headers=headers,
         )
         response = self.client.send(request, stream=True)
         if not response.is_success:
@@ -204,7 +216,21 @@ class GoogleDriveStorage:
             finally:
                 response.close()
 
-        return chunks()
+        response_headers = {"Accept-Ranges": "bytes"}
+        for source, target in (
+            ("content-range", "Content-Range"),
+            ("content-length", "Content-Length"),
+        ):
+            if value := response.headers.get(source):
+                response_headers[target] = value
+        return DownloadStream(
+            content=chunks(),
+            status_code=response.status_code,
+            headers=response_headers,
+        )
+
+    def open_download(self, object_key: str) -> Iterator[bytes]:
+        return self.open_download_response(object_key).content
 
 
 @lru_cache

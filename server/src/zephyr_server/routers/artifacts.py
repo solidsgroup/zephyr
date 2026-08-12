@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from ..schemas import (
     RunRead,
 )
 from ..storage import GoogleDriveStorage, StorageError, StoredObjectNotFound, get_storage
-from .runs import get_accessible_run, run_read
+from .runs import get_accessible_run, is_preview_media, run_read
 
 router = APIRouter(prefix="/runs/{run_id}/artifacts", tags=["artifacts"])
 content_router = APIRouter(prefix="/artifacts", tags=["artifacts"])
@@ -53,20 +53,22 @@ def artifact_read(record: RunArtifact, download_url: str | None = None) -> Artif
 @content_router.get("/content/{token}", include_in_schema=False)
 def artifact_content(
     token: str,
+    request: Request,
     settings: Settings = Depends(get_settings),
     storage: GoogleDriveStorage = Depends(get_storage),
 ) -> StreamingResponse:
     object_key, content_type = decode_download_token(settings, token)
     try:
-        content = storage.open_download(object_key)
+        download = storage.open_download_response(object_key, request.headers.get("range"))
     except StoredObjectNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except StorageError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return StreamingResponse(
-        content,
+        download.content,
         media_type=content_type,
-        headers={"Cache-Control": "private, no-store"},
+        status_code=download.status_code,
+        headers={**download.headers, "Cache-Control": "private, no-store"},
     )
 
 
@@ -201,8 +203,11 @@ async def select_thumbnail(
     if record is None or record.run_id != run.id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await db.refresh(record, attribute_names=["object"])
-    if record.kind != "image" or not record.object.content_type.startswith("image/"):
-        raise HTTPException(status_code=422, detail="Only image artifacts can be thumbnails")
+    if not is_preview_media(record):
+        raise HTTPException(
+            status_code=422,
+            detail="Only image and video artifacts can be thumbnails",
+        )
     run.thumbnail_artifact_id = record.id
     await db.commit()
     await db.refresh(run)
@@ -213,6 +218,7 @@ async def select_thumbnail(
 async def preview_artifact_content(
     run_id: uuid.UUID,
     artifact_id: uuid.UUID,
+    request: Request,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     storage: GoogleDriveStorage = Depends(get_storage),
@@ -222,18 +228,22 @@ async def preview_artifact_content(
     if record is None or record.run_id != run_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await db.refresh(record, attribute_names=["object"])
-    if record.kind != "image" or not record.object.content_type.startswith("image/"):
-        raise HTTPException(status_code=404, detail="Image preview not found")
+    if not is_preview_media(record):
+        raise HTTPException(status_code=404, detail="Artifact preview not found")
     try:
-        content = storage.open_download(record.object.object_key)
+        download = storage.open_download_response(
+            record.object.object_key,
+            request.headers.get("range"),
+        )
     except StoredObjectNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except StorageError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return StreamingResponse(
-        content,
+        download.content,
         media_type=record.object.content_type,
-        headers={"Cache-Control": "private, max-age=300"},
+        status_code=download.status_code,
+        headers={**download.headers, "Cache-Control": "private, max-age=300"},
     )
 
 

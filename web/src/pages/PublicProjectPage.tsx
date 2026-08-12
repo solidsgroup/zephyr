@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { publicApi } from "../api";
+import { isVideoContentType, isVisualContentType } from "../artifacts";
 import MetadataTable from "../components/MetadataTable";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
@@ -19,7 +20,7 @@ function PublicRunView({ slug, runId }: { slug: string; runId: string }) {
     <header className="run-header"><div><div className="run-title-row"><h1>{run.name}</h1><StatusPill status={run.effective_status} /></div><p>Public reproducibility record · <code>{run.alamo_hash ?? run.id}</code></p></div></header>
     <section className="panel"><div className="panel-heading"><div><p className="eyebrow">THERMODYNAMICS</p><h2>Results</h2></div></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>
     {metadata && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">PROVENANCE</p><h2>Metadata</h2></div></div><MetadataTable records={[{ name: run.name, values: metadata.values }]} /></section>}
-    <section><div className="section-heading"><div><h2>Artifacts</h2><p>Published files associated with this simulation.</p></div></div><div className="artifact-grid">{artifacts.map((artifact) => <a className="artifact-card public-artifact" key={artifact.id} href={artifact.download_url ?? "#"}><div className="artifact-preview">{artifact.kind === "image" && artifact.download_url ? <img src={artifact.download_url} alt="" /> : <span>◇</span>}</div><div className="artifact-info"><strong>{artifact.logical_name}</strong><small>{artifact.path}</small></div><span>⇩</span></a>)}</div></section>
+    <section><div className="section-heading"><div><h2>Artifacts</h2><p>Published files associated with this simulation.</p></div></div><div className="artifact-grid">{artifacts.map((artifact) => <a className="artifact-card public-artifact" key={artifact.id} href={artifact.download_url ?? "#"}><div className="artifact-preview">{artifact.download_url && isVideoContentType(artifact.content_type) ? <video src={artifact.download_url} autoPlay muted loop playsInline preload="metadata" aria-label={artifact.logical_name} /> : artifact.download_url && isVisualContentType(artifact.content_type) ? <img src={artifact.download_url} alt={artifact.logical_name} /> : <span>◇</span>}</div><div className="artifact-info"><strong>{artifact.logical_name}</strong><small>{artifact.path}</small></div><span>⇩</span></a>)}</div></section>
   </>;
 }
 

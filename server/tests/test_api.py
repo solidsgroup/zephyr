@@ -66,6 +66,10 @@ async def test_run_lifecycle_and_public_project() -> None:
                 headers=headers,
             )
             assert metadata.json()["values"]["HASH"] == "abc123"
+            searched_metadata = await client.get(
+                "/api/v1/runs", params={"search": "compute-[041-042]"}
+            )
+            assert run_id in {run["id"] for run in searched_metadata.json()}
 
             first_copy = await client.put(
                 f"/api/v1/runs/{run_id}/copies",
@@ -179,9 +183,7 @@ async def test_run_lifecycle_and_public_project() -> None:
             copies = await client.get(f"/api/v1/runs/{run_id}/copies")
             assert len(copies.json()) == 2
             assert {copy["total_size_bytes"] for copy in copies.json()} == {None}
-            shallow_copy = next(
-                copy for copy in copies.json() if copy["site"] == "stampede3"
-            )
+            shallow_copy = next(copy for copy in copies.json() if copy["site"] == "stampede3")
             assert shallow_copy["file_count_complete"] is False
             assert shallow_copy["data_tree_count"] == 1248
 
@@ -224,9 +226,9 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert output.status_code == 200
             assert output.json()["stdout"] == "step 1 complete\n"
-            assert output.json()["stdout_digest"] == hashlib.sha256(
-                b"step 1 complete\n"
-            ).hexdigest()
+            assert (
+                output.json()["stdout_digest"] == hashlib.sha256(b"step 1 complete\n").hexdigest()
+            )
 
             sync_state = await client.post(
                 "/api/v1/runs/sync-state",
@@ -236,9 +238,10 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert sync_state.status_code == 200
             assert len(sync_state.json()) == 1
             assert sync_state.json()[0]["alamo_hash"] == "abc123"
-            assert sync_state.json()[0]["metadata_digest"] == hashlib.sha256(
-                metadata_text.encode()
-            ).hexdigest()
+            assert (
+                sync_state.json()[0]["metadata_digest"]
+                == hashlib.sha256(metadata_text.encode()).hexdigest()
+            )
             assert sync_state.json()[0]["stdout_digest"] == output.json()["stdout_digest"]
 
             thermo = await client.post(
@@ -276,9 +279,28 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert added.status_code == 204
 
+            batch_run = await client.post(
+                "/api/v1/runs",
+                json={"name": "Batch project run", "alamo_hash": f"batch-{uuid.uuid4()}"},
+                headers=headers,
+            )
+            assert batch_run.status_code == 201
+            batch_run_id = batch_run.json()["id"]
+            editable_projects = await client.get("/api/v1/projects", params={"editable": "true"})
+            assert project_id in {item["id"] for item in editable_projects.json()}
+            batch_added = await client.post(
+                f"/api/v1/projects/{project_id}/runs/batch",
+                json={"run_ids": [run_id, batch_run_id]},
+                headers=headers,
+            )
+            assert batch_added.status_code == 200
+            assert batch_added.json() == {"added": 1, "already_present": 1}
+            project_runs = await client.get(f"/api/v1/projects/{project_id}/runs")
+            assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
+
             public = await client.get("/api/v1/public/projects/rm-study")
             assert public.status_code == 200
-            assert public.json()["runs"][0]["id"] == run_id
+            assert {item["id"] for item in public.json()["runs"]} == {run_id, batch_run_id}
 
             detail = await client.get(f"/api/v1/runs/{run_id}")
             assert detail.json()["run"]["scheduler_details"]["plot_file"] == "output.481516"
@@ -296,4 +318,6 @@ async def test_run_lifecycle_and_public_project() -> None:
 
             deleted_run = await client.delete(f"/api/v1/runs/{run_id}", headers=headers)
             assert deleted_run.status_code == 204
+            deleted_batch_run = await client.delete(f"/api/v1/runs/{batch_run_id}", headers=headers)
+            assert deleted_batch_run.status_code == 204
             assert (await client.get(f"/api/v1/runs/{run_id}")).status_code == 404

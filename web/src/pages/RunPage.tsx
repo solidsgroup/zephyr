@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "wouter";
 import { api } from "../api";
+import { isVideoContentType, isVisualContentType } from "../artifacts";
 import CopyButton from "../components/CopyButton";
 import MetadataTable from "../components/MetadataTable";
 import StatusPill from "../components/StatusPill";
@@ -17,23 +18,52 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
 }
 
+function ArtifactMedia({ artifact, url, fullscreen = false }: { artifact: Artifact; url: string; fullscreen?: boolean }) {
+  if (isVideoContentType(artifact.content_type)) {
+    return <video src={url} aria-label={artifact.logical_name} controls={fullscreen} autoPlay muted={!fullscreen} loop playsInline preload="metadata" />;
+  }
+  return <img src={url} alt={artifact.logical_name} />;
+}
+
+export function ArtifactViewer({ artifact, url, onClose }: { artifact: Artifact; url: string; onClose: () => void }) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose]);
+  return (
+    <div className="artifact-viewer" role="dialog" aria-modal="true" aria-label={`Preview ${artifact.logical_name}`} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <header><div><strong>{artifact.logical_name}</strong><small>{artifact.path}</small></div><button onClick={onClose} aria-label="Close fullscreen preview">×</button></header>
+      <div className="artifact-viewer-media"><ArtifactMedia artifact={artifact} url={url} fullscreen /></div>
+    </div>
+  );
+}
+
 function ArtifactCard({
   runId,
   artifact,
   isThumbnail,
   selectingThumbnail,
   onSelectThumbnail,
+  onOpen,
 }: {
   runId: string;
   artifact: Artifact;
   isThumbnail: boolean;
   selectingThumbnail: boolean;
   onSelectThumbnail: () => void;
+  onOpen: (url: string) => void;
 }) {
+  const visual = isVisualContentType(artifact.content_type);
   const download = useQuery({
     queryKey: ["artifact-download", artifact.id],
     queryFn: () => api<Artifact>(`/runs/${runId}/artifacts/${artifact.id}/download`),
-    enabled: artifact.kind === "image",
+    enabled: visual,
     staleTime: 10 * 60_000,
   });
   const requestDownload = async () => {
@@ -42,8 +72,11 @@ function ArtifactCard({
   };
   return (
     <article className="artifact-card" data-thumbnail={isThumbnail}>
-      <div className="artifact-preview">{artifact.kind === "image" && download.data?.download_url ? <img src={download.data.download_url} alt={artifact.logical_name} /> : <span>{artifact.kind === "table" ? "▦" : artifact.kind === "log" ? "≡" : "◇"}</span>}</div>
-      <div className="artifact-info"><strong title={artifact.path}>{artifact.logical_name}</strong><small>{artifact.path} · {formatBytes(artifact.size)} · v{artifact.version}</small>{artifact.kind === "image" && <button className={`thumbnail-choice${isThumbnail ? " active" : ""}`} disabled={isThumbnail || selectingThumbnail} onClick={onSelectThumbnail}>{isThumbnail ? "★ Thumbnail" : selectingThumbnail ? "Setting…" : "☆ Use as thumbnail"}</button>}</div>
+      <button className="artifact-preview" disabled={!visual || !download.data?.download_url} onClick={() => download.data?.download_url && onOpen(download.data.download_url)} aria-label={visual ? `Open ${artifact.logical_name} fullscreen` : undefined}>
+        {visual && download.data?.download_url ? <ArtifactMedia artifact={artifact} url={download.data.download_url} /> : <span>{artifact.kind === "table" ? "▦" : artifact.kind === "log" ? "≡" : "◇"}</span>}
+        {visual && download.data?.download_url && <i title="Open fullscreen">⛶</i>}
+      </button>
+      <div className="artifact-info"><strong title={artifact.path}>{artifact.logical_name}</strong><small>{artifact.path} · {formatBytes(artifact.size)} · v{artifact.version}</small>{visual && <button className={`thumbnail-choice${isThumbnail ? " active" : ""}`} disabled={isThumbnail || selectingThumbnail} onClick={onSelectThumbnail}>{isThumbnail ? "★ Thumbnail" : selectingThumbnail ? "Setting…" : "☆ Use as thumbnail"}</button>}</div>
       <button className="icon-button" title="Download" onClick={requestDownload}>⇩</button>
     </article>
   );
@@ -200,6 +233,7 @@ export default function RunPage() {
   const { runId = "" } = useParams();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("overview");
+  const [viewer, setViewer] = useState<{ artifact: Artifact; url: string } | null>(null);
   const detail = useQuery({ queryKey: ["run", runId], queryFn: () => api<RunDetail>(`/runs/${runId}`), refetchInterval: 15_000 });
   const artifacts = useQuery({ queryKey: ["artifacts", runId], queryFn: () => api<Artifact[]>(`/runs/${runId}/artifacts`) });
   const latestArtifacts = useMemo(() => {
@@ -239,8 +273,9 @@ export default function RunPage() {
       {tab === "stdout" && <section className="panel output-panel"><div className="panel-heading"><div><p className="eyebrow">LIVE OUTPUT</p><h2>stdout</h2></div>{output && <span>Updated {new Date(output.updated_at).toLocaleTimeString()}</span>}</div>{output ? <><pre>{output.stdout || "No output has been written yet."}</pre>{output.stdout_truncated && <p className="output-note">Showing the most recent 1 MB.</p>}</> : <div className="empty-panel">No stdout has been posted for this run yet.</div>}</section>}
       {tab === "git diff" && <section className="panel output-panel diff-output"><div className="panel-heading"><div><p className="eyebrow">BUILD PROVENANCE</p><h2>git diff</h2></div></div>{output ? output.git_diff ? <><pre>{output.git_diff}</pre>{output.git_diff_truncated && <p className="output-note">Showing the first 1 MB.</p>}</> : <div className="empty-panel clean-diff"><span>✓</span>Working tree was clean at build time.</div> : <div className="empty-panel">No git diff has been posted for this run yet.</div>}</section>}
       {tab === "thermo" && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">RESULTS EXPLORER</p><h2>thermo.dat</h2></div><span>{thermo.reduce((count, series) => count + series.rows.length, 0).toLocaleString()} rows</span></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>}
-      {tab === "files" && <section><div className="section-heading"><div><h2>Artifacts</h2><p>Latest version of each posted file. Choose an image to represent this run.</p></div></div>{selectThumbnail.isError && <p className="form-error">Could not set the run thumbnail.</p>}{latestArtifacts.length ? <div className="artifact-grid">{latestArtifacts.map((artifact) => <ArtifactCard key={artifact.id} runId={run.id} artifact={artifact} isThumbnail={artifact.id === run.thumbnail_artifact_id} selectingThumbnail={selectThumbnail.isPending && selectThumbnail.variables === artifact.id} onSelectThumbnail={() => selectThumbnail.mutate(artifact.id)} />)}</div> : <div className="empty-panel panel">No artifacts yet. Upload some with <code>zph put '*.png'</code>.</div>}</section>}
+      {tab === "files" && <section><div className="section-heading"><div><h2>Artifacts</h2><p>Latest version of each posted file. Click an image or video for a fullscreen view.</p></div></div>{selectThumbnail.isError && <p className="form-error">Could not set the run thumbnail.</p>}{latestArtifacts.length ? <div className="artifact-grid">{latestArtifacts.map((artifact) => <ArtifactCard key={artifact.id} runId={run.id} artifact={artifact} isThumbnail={artifact.id === run.thumbnail_artifact_id} selectingThumbnail={selectThumbnail.isPending && selectThumbnail.variables === artifact.id} onSelectThumbnail={() => selectThumbnail.mutate(artifact.id)} onOpen={(url) => setViewer({ artifact, url })} />)}</div> : <div className="empty-panel panel">No artifacts yet. Upload some with <code>zph put '*.png'</code>.</div>}</section>}
       {tab === "metadata" && <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Alamo output</p><h2>metadata</h2></div><code>{metadata?.digest.slice(0, 12) ?? "not posted"}</code></div>{metadata ? <><MetadataTable records={[{ name: run.name, values: metadata.values }]} /><details className="raw-metadata"><summary>Raw file</summary><pre>{metadata.raw_text}</pre></details></> : <div className="empty-panel">No metadata file has been posted.</div>}</section>}
+      {viewer && <ArtifactViewer artifact={viewer.artifact} url={viewer.url} onClose={() => setViewer(null)} />}
     </>
   );
 }

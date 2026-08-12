@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,8 @@ from ..schemas import (
     ProjectMemberRead,
     ProjectRead,
     ProjectRunAdd,
+    ProjectRunBatchAdd,
+    ProjectRunBatchResult,
     ProjectUpdate,
 )
 from .runs import run_read
@@ -42,24 +44,24 @@ async def accessible_project(db: AsyncSession, user: User, project_id: uuid.UUID
 
 
 @router.get("", response_model=list[ProjectRead])
-async def list_projects(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    return list(
-        await db.scalars(
-            select(Project)
-            .where(
-                or_(
-                    Project.owner_id == user.id,
-                    Project.visibility.in_({"group", "public"}),
-                    Project.id.in_(
-                        select(ProjectMembership.project_id).where(
-                            ProjectMembership.user_id == user.id
-                        )
-                    ),
-                )
-            )
-            .order_by(Project.name)
-        )
+async def list_projects(
+    editable: bool = Query(default=False),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member_projects = select(ProjectMembership.project_id).where(
+        ProjectMembership.user_id == user.id
     )
+    if editable:
+        member_projects = member_projects.where(ProjectMembership.role.in_({"owner", "editor"}))
+        access = or_(Project.owner_id == user.id, Project.id.in_(member_projects))
+    else:
+        access = or_(
+            Project.owner_id == user.id,
+            Project.visibility.in_({"group", "public"}),
+            Project.id.in_(member_projects),
+        )
+    return list(await db.scalars(select(Project).where(access).order_by(Project.name)))
 
 
 @router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
@@ -224,6 +226,47 @@ async def add_run(
     if await db.get(RunProject, (run.id, project.id)) is None:
         db.add(RunProject(run_id=run.id, project_id=project.id))
         await db.commit()
+
+
+@router.post("/{project_id}/runs/batch", response_model=ProjectRunBatchResult)
+async def add_runs_batch(
+    project_id: uuid.UUID,
+    payload: ProjectRunBatchAdd,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectRunBatchResult:
+    project = await accessible_project(db, user, project_id)
+    if project.owner_id != user.id:
+        membership = await db.scalar(
+            select(ProjectMembership).where(
+                ProjectMembership.project_id == project.id,
+                ProjectMembership.user_id == user.id,
+                ProjectMembership.role.in_({"owner", "editor"}),
+            )
+        )
+        if membership is None:
+            raise HTTPException(status_code=403, detail="Project edit access required")
+
+    run_ids = set(payload.run_ids)
+    owned_run_ids = set(
+        await db.scalars(select(Run.id).where(Run.id.in_(run_ids), Run.owner_id == user.id))
+    )
+    if owned_run_ids != run_ids:
+        raise HTTPException(status_code=404, detail="One or more owned runs were not found")
+
+    existing_ids = set(
+        await db.scalars(
+            select(RunProject.run_id).where(
+                RunProject.project_id == project.id,
+                RunProject.run_id.in_(run_ids),
+            )
+        )
+    )
+    new_ids = run_ids - existing_ids
+    db.add_all(RunProject(run_id=run_id, project_id=project.id) for run_id in new_ids)
+    if new_ids:
+        await db.commit()
+    return ProjectRunBatchResult(added=len(new_ids), already_present=len(existing_ids))
 
 
 @router.get("/{project_id}/runs")

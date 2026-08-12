@@ -34,6 +34,7 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                         ("temperature.png", "image", "image/png"),
                         ("solver.log", "log", "text/plain"),
                         ("temperature.png", "image", "image/png"),
+                        ("animation.webm", "file", "video/webm"),
                     ],
                     start=1,
                 ):
@@ -56,24 +57,29 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                     db.add_all([obj, record])
                     records.append(record)
                 await db.commit()
-                pressure_id = str(records[0].id)
                 selected_id = str(records[1].id)
                 log_id = str(records[2].id)
                 latest_temperature_id = str(records[3].id)
+                webm_id = str(records[4].id)
 
             searched = await client.get("/api/v1/runs", params={"search": ".gif"})
             assert str(run_id) in {run["id"] for run in searched.json()}
             without_thumbnail = await client.get("/api/v1/runs", params={"has_thumbnail": "false"})
             assert str(run_id) in {run["id"] for run in without_thumbnail.json()}
 
+            selected_webm = await client.put(
+                f"/api/v1/runs/{run_id}/artifacts/{webm_id}/thumbnail",
+                headers=headers,
+            )
+            assert selected_webm.status_code == 200
+            assert selected_webm.json()["thumbnail_artifact_id"] == webm_id
+
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))
-            assert listed["artifact_count"] == 3
+            assert listed["artifact_count"] == 4
             assert len(listed["artifact_previews"]) == 3
-            assert {preview["id"] for preview in listed["artifact_previews"][:2]} == {
-                pressure_id,
-                latest_temperature_id,
-            }
+            assert listed["artifact_previews"][0]["id"] == webm_id
+            assert listed["artifact_previews"][0]["content_type"] == "video/webm"
             assert listed["artifact_previews"][0]["download_url"].startswith(
                 f"/api/v1/runs/{run_id}/artifacts/"
             )
