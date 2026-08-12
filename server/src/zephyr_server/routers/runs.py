@@ -235,6 +235,7 @@ async def list_runs(
     project_id: uuid.UUID | None = None,
     has_thumbnail: bool | None = None,
     site: str | None = None,
+    uncategorized: bool = False,
     limit: int = Query(default=200, ge=1, le=1000),
     include_scheduler_metadata: bool = False,
     user: User = Depends(current_user),
@@ -287,6 +288,8 @@ async def list_runs(
             .correlate(Run)
             .exists()
         )
+    if uncategorized:
+        query = query.where(Run.id.not_in(select(RunProject.run_id)))
     runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)
     metadata_by_run: dict[uuid.UUID, dict[str, str]] = {}

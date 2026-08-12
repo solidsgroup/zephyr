@@ -4,7 +4,7 @@ import { Link, useLocation } from "wouter";
 import { api } from "../api";
 import { isVideoContentType, isVisualContentType } from "../artifacts";
 import { selectionRange, useShiftPressed } from "../selection";
-import type { Project, Run, RunFacets } from "../types";
+import type { Project, ProjectFolder, ProjectLayout, Run, RunFacets } from "../types";
 import LazyVideo from "./LazyVideo";
 import StatusPill from "./StatusPill";
 
@@ -22,6 +22,24 @@ function artifactGlyph(kind: string) {
   if (kind === "log") return "≡";
   if (kind === "checkpoint") return "◫";
   return "◇";
+}
+
+function folderOptions(folders: ProjectFolder[]) {
+  const children = new Map<string, ProjectFolder[]>();
+  for (const folder of folders) {
+    const key = folder.parent_id ?? "";
+    children.set(key, [...(children.get(key) ?? []), folder]);
+  }
+  for (const values of children.values()) values.sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+  const options: Array<{ id: string; label: string }> = [];
+  const visit = (parentId: string, depth: number) => {
+    for (const folder of children.get(parentId) ?? []) {
+      options.push({ id: folder.id, label: `${"　".repeat(depth)}${depth ? "↳ " : ""}${folder.name}` });
+      visit(folder.id, depth + 1);
+    }
+  };
+  visit("", 0);
+  return options;
 }
 
 export function ArtifactStack({ run }: { run: Run }) {
@@ -59,12 +77,14 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [status, setStatus] = useState("");
   const [site, setSite] = useState("");
   const [thumbnail, setThumbnail] = useState("");
+  const [uncategorized, setUncategorized] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const selectionAnchor = useRef<string | null>(null);
   const shiftPressed = useShiftPressed();
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [projectId, setProjectId] = useState("");
+  const [projectFolderId, setProjectFolderId] = useState("");
   const [projectNotice, setProjectNotice] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -79,11 +99,12 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     if (status) query.set("status", status);
     if (site) query.set("site", site);
     if (thumbnail) query.set("has_thumbnail", thumbnail);
+    if (uncategorized) query.set("uncategorized", "true");
     const suffix = query.toString();
     return `/runs${suffix ? `?${suffix}` : ""}`;
-  }, [searchQuery, site, status, thumbnail]);
+  }, [searchQuery, site, status, thumbnail, uncategorized]);
   const runs = useQuery({
-    queryKey: ["runs", "browser", searchQuery, status, site, thumbnail],
+    queryKey: ["runs", "browser", searchQuery, status, site, thumbnail, uncategorized],
     queryFn: ({ signal }) => api<Run[]>(runsPath, { signal }),
     refetchInterval: 15_000,
     placeholderData: (previous) => previous,
@@ -106,19 +127,27 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const projects = useQuery({
     queryKey: ["projects", "editable"],
     queryFn: () => api<Project[]>("/projects?editable=true"),
-    enabled: selectedIds.length >= 2 && showProjectPicker,
+    enabled: selectedIds.length >= 1 && showProjectPicker,
   });
+  const projectLayout = useQuery({
+    queryKey: ["project-layout", projectId],
+    queryFn: ({ signal }) => api<ProjectLayout>(`/projects/${projectId}/layout`, { signal }),
+    enabled: showProjectPicker && Boolean(projectId),
+  });
+  const destinationFolders = useMemo(() => folderOptions(projectLayout.data?.folders ?? []), [projectLayout.data?.folders]);
   const addToProject = useMutation({
     mutationFn: () => api<{ added: number; already_present: number }>(`/projects/${projectId}/runs/batch`, {
       method: "POST",
-      body: JSON.stringify({ run_ids: selectedIds }),
+      body: JSON.stringify({ run_ids: selectedIds, folder_id: projectFolderId || null }),
     }),
     onSuccess: (result) => {
       const project = projects.data?.find((item) => item.id === projectId);
       const existing = result.already_present ? `; ${result.already_present} already there` : "";
       setProjectNotice(`Added ${result.added} to ${project?.name ?? "project"}${existing}`);
       setShowProjectPicker(false);
-      queryClient.invalidateQueries({ queryKey: ["project-runs", projectId] });
+      setProjectFolderId("");
+      queryClient.invalidateQueries({ queryKey: ["project-layout", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["runs", "browser"] });
     },
   });
 
@@ -184,6 +213,11 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
             <option value="false">No thumbnail</option>
           </select>
         </div>
+        <button className="run-category-filter" aria-pressed={uncategorized} onClick={() => setUncategorized((value) => !value)}>
+          <span aria-hidden="true">⌁</span>
+          <strong>Uncategorized only</strong>
+          <small>Not in any project</small>
+        </button>
       </div>
       <div className="run-browser-list" aria-label="Runs">
         {runs.isPending ? <div className="run-browser-state"><span className="spinner" />Loading runs…</div> :
@@ -220,25 +254,44 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
         {!runs.isPending && !runs.isError && !data.length && <div className="run-browser-state">No runs match this view.</div>}
       </div>
       <footer className="run-browser-footer">
-        {selectedIds.length >= 2 ? <>
-          {showProjectPicker && <div className="run-project-picker">
-            <strong>Add {selectedIds.length} runs to project</strong>
-            {projects.isPending ? <span>Loading projects…</span> : projects.data?.length ? <>
-              <select value={projectId} onChange={(event) => setProjectId(event.target.value)} aria-label="Choose project">
+        {showProjectPicker && selectedIds.length >= 1 && <div className="run-project-picker" role="dialog" aria-label="Add selected runs to project">
+          <header>
+            <span aria-hidden="true">＋</span>
+            <div><strong>Add to project</strong><small>{selectedIds.length} {selectedIds.length === 1 ? "run" : "runs"} selected</small></div>
+            <button aria-label="Close project picker" onClick={() => setShowProjectPicker(false)}>×</button>
+          </header>
+          {projects.isPending ? <div className="run-project-picker-state"><span className="spinner" />Loading projects…</div> : projects.data?.length ? <>
+            <label>
+              <span>Project</span>
+              <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setProjectFolderId(""); addToProject.reset(); }} aria-label="Choose project">
                 <option value="">Choose project…</option>
                 {projects.data.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
               </select>
-              <button className="button button-primary" disabled={!projectId || addToProject.isPending} onClick={() => addToProject.mutate()}>{addToProject.isPending ? "Adding…" : "Add runs"}</button>
-              {addToProject.isError && <span className="error-text">Could not add these runs.</span>}
-            </> : <span>No editable projects. <Link href="/projects">Create one</Link></span>}
-          </div>}
-          {projectNotice && !showProjectPicker && <span className="run-project-notice">{projectNotice}</span>}
-          <div className="run-selection-actions">
-            <button className="button" aria-expanded={showProjectPicker} onClick={() => { setShowProjectPicker((value) => !value); setProjectNotice(""); }}>Add to project</button>
-            <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length}</button>
+            </label>
+            <label>
+              <span>Destination</span>
+              <select value={projectFolderId} onChange={(event) => setProjectFolderId(event.target.value)} aria-label="Choose project folder" disabled={!projectId || projectLayout.isPending || projectLayout.isError}>
+                <option value="">{projectLayout.isPending ? "Loading folders…" : "Project root"}</option>
+                {destinationFolders.map((folder) => <option value={folder.id} key={folder.id}>{folder.label}</option>)}
+              </select>
+            </label>
+            {projectId && !projectLayout.isPending && !projectLayout.isError && !destinationFolders.length && <p>This project has no folders yet. Runs will be added at the root.</p>}
+            {projectLayout.isError && <p className="error-text">Could not load this project’s folders.</p>}
+            {addToProject.isError && <p className="error-text">Could not add the selected {selectedIds.length === 1 ? "run" : "runs"}.</p>}
+            <div className="run-project-picker-actions">
+              <button className="button" onClick={() => setShowProjectPicker(false)}>Cancel</button>
+              <button className="button button-primary" disabled={!projectId || projectLayout.isPending || projectLayout.isError || addToProject.isPending} onClick={() => addToProject.mutate()}>{addToProject.isPending ? "Adding…" : `Add ${selectedIds.length === 1 ? "run" : `${selectedIds.length} runs`}`}</button>
+            </div>
+          </> : <div className="run-project-picker-state">No editable projects. <Link href="/projects">Create one</Link></div>}
+        </div>}
+        {projectNotice && <span className="run-project-notice">{projectNotice}</span>}
+        {selectedIds.length >= 1 ? <>
+          <div className="run-selection-actions" data-single={selectedIds.length === 1 || undefined}>
+            <button className="button" aria-expanded={showProjectPicker} onClick={() => { setShowProjectPicker((value) => !value); setProjectNotice(""); addToProject.reset(); }}><span aria-hidden="true">＋</span> Add to project</button>
+            {selectedIds.length >= 2 && <button className="button button-primary" onClick={() => navigate(`/compare?ids=${selectedIds.join(",")}`)}>Compare {selectedIds.length}</button>}
           </div>
         </> :
-          <span>{selectedIds.length === 1 ? "Shift-click a range or Ctrl/Cmd-click another run" : "Shift-click a range · Ctrl/Cmd-click individual runs"}</span>}
+          <span>Shift-click a range · Ctrl/Cmd-click individual runs</span>}
       </footer>
     </aside>
   );

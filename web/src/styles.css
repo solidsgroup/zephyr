@@ -20,7 +20,7 @@ button { cursor: pointer; }
 code, pre { font-family: "DM Mono", monospace; }
 
 .shell { min-height: 100vh; display: grid; grid-template-columns: 64px minmax(0, 1fr); }
-.shell.runs-layout { grid-template-columns: 64px 320px minmax(0, 1fr); }
+.shell.runs-layout { grid-template-columns: 64px 360px minmax(0, 1fr); }
 .app-rail { background: #101722; color: #aeb8ca; padding: 16px 9px 14px; position: fixed; z-index: 30; inset: 0 auto 0 0; width: 64px; display: flex; flex-direction: column; align-items: center; border-right: 1px solid #273142; }
 .brand { display: flex; align-items: center; gap: 12px; color: white; text-decoration: none; padding: 0 8px; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; font-weight: 700; font-size: 20px; color: white; background: linear-gradient(145deg, #2c77ff, #7147e8); box-shadow: 0 8px 24px #1d4ed866; }
@@ -61,6 +61,12 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-search span { position: absolute; left: 10px; top: 6px; color: #98a2b3; font-size: 18px; }
 .run-search input, .run-browser-filters select { width: 100%; height: 34px; border: 1px solid #d8dee7; border-radius: 7px; padding: 6px 8px; background: white; color: #344054; font-size: 11px; outline: none; }
 .run-search input { padding-left: 31px; }
+.run-category-filter { min-height: 32px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 5px; border: 1px solid #d8dee7; padding: 4px 8px; background: white; color: #667085; text-align: left; }
+.run-category-filter > span { color: #98a2b3; font-size: 15px; }
+.run-category-filter strong { font-size: 9px; }
+.run-category-filter small { color: #98a2b3; font-size: 8px; }
+.run-category-filter[aria-pressed="true"] { border-color: #84adff; background: #eef4ff; color: #175cd3; box-shadow: inset 3px 0 #246bfd; }
+.run-category-filter[aria-pressed="true"] > span { color: #246bfd; }
 .run-browser-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #cbd3df transparent; }
 .run-browser-item { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; border-bottom: 1px solid #edf0f4; border-left: 3px solid transparent; padding: 7px 12px 7px 9px; }
 .run-browser-item:hover { background: #f4f7fa; }
@@ -82,11 +88,23 @@ code, pre { font-family: "DM Mono", monospace; }
 .run-browser-state.error-text { color: #b42318; }
 .run-browser-footer { position: relative; min-height: 46px; display: grid; place-items: center; padding: 8px 12px; border-top: 1px solid #e7ebf1; background: white; color: #98a2b3; font-size: 9px; }
 .run-selection-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.run-selection-actions[data-single="true"] { grid-template-columns: 1fr; }
 .run-selection-actions .button { min-width: 0; padding: 7px 5px; font-size: 10px; }
-.run-project-picker { position: absolute; z-index: 10; left: 12px; right: 12px; bottom: 51px; display: flex; flex-direction: column; gap: 8px; border: 1px solid #d8dee7; padding: 12px; background: white; box-shadow: 0 12px 30px #1018282b; color: #667085; text-align: left; }
-.run-project-picker strong { color: #18202d; font-size: 10px; }
-.run-project-picker select { width: 100%; }
-.run-project-picker .button { width: 100%; padding: 7px; }
+.run-project-picker { position: absolute; z-index: 10; left: 8px; right: 8px; bottom: 55px; display: flex; flex-direction: column; gap: 13px; border: 1px solid #cbd3df; padding: 17px; background: white; box-shadow: 0 16px 36px #10182830; color: #667085; text-align: left; }
+.run-project-picker > header { display: grid; grid-template-columns: 34px minmax(0, 1fr) 26px; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #edf0f4; }
+.run-project-picker > header > span { width: 34px; height: 34px; display: grid; place-items: center; background: #eaf2ff; color: #175cd3; font-size: 19px; }
+.run-project-picker > header > div { display: flex; flex-direction: column; gap: 2px; }
+.run-project-picker > header strong { color: #18202d; font-size: 13px; }
+.run-project-picker > header small { color: #98a2b3; font-size: 9px; }
+.run-project-picker > header > button { width: 26px; height: 26px; border: 0; background: transparent; color: #7c8799; font-size: 20px; }
+.run-project-picker > header > button:hover { background: #f1f4f8; color: #344054; }
+.run-project-picker label { display: flex; flex-direction: column; gap: 5px; color: #667085; font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.run-project-picker select { width: 100%; height: 38px; border: 1px solid #cfd6e0; padding: 7px 9px; background: white; color: #344054; font-size: 11px; text-transform: none; }
+.run-project-picker p { margin: -5px 0 0; color: #98a2b3; font-size: 8px; line-height: 1.5; }
+.run-project-picker p.error-text { color: #b42318; }
+.run-project-picker-actions { display: grid; grid-template-columns: .75fr 1.25fr; gap: 8px; padding-top: 2px; }
+.run-project-picker-actions .button { width: 100%; padding: 9px 8px; font-size: 10px; }
+.run-project-picker-state { min-height: 80px; display: flex; align-items: center; justify-content: center; gap: 7px; color: #7c8799; font-size: 10px; text-align: center; }
 .run-project-picker a { color: #175cd3; }
 .run-project-notice { margin-bottom: 6px; color: #067647; font-size: 8px; }
 .run-panel-toggle { display: none; align-items: center; gap: 6px; margin-bottom: 16px; border: 1px solid #d8dee7; border-radius: 7px; padding: 6px 9px; background: white; color: #475467; font-size: 11px; font-weight: 600; }
@@ -493,7 +511,7 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .public-hero > p:last-child { color: #667085; font-size: 16px; line-height: 1.7; }
 
 @media (max-width: 1000px) {
-  .shell.runs-layout { grid-template-columns: 64px 284px minmax(0, 1fr); }
+  .shell.runs-layout { grid-template-columns: 64px 320px minmax(0, 1fr); }
   .run-browser-item > a { grid-template-columns: 58px minmax(0, 1fr); }
   .run-artifact-slot { width: 58px; overflow: hidden; }
   .content { padding: 34px 28px 60px; }

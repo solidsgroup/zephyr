@@ -286,6 +286,9 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert batch_run.status_code == 201
             batch_run_id = batch_run.json()["id"]
+            uncategorized = await client.get("/api/v1/runs", params={"uncategorized": "true"})
+            assert uncategorized.status_code == 200
+            assert batch_run_id in {item["id"] for item in uncategorized.json()}
             editable_projects = await client.get("/api/v1/projects", params={"editable": "true"})
             assert project_id in {item["id"] for item in editable_projects.json()}
             batch_added = await client.post(
@@ -295,6 +298,10 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert batch_added.status_code == 200
             assert batch_added.json() == {"added": 1, "already_present": 1}
+            uncategorized_after_add = await client.get(
+                "/api/v1/runs", params={"uncategorized": "true"}
+            )
+            assert batch_run_id not in {item["id"] for item in uncategorized_after_add.json()}
             project_runs = await client.get(f"/api/v1/projects/{project_id}/runs")
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
 
