@@ -6,6 +6,7 @@ import { ArtifactStack } from "../components/RunBrowser";
 import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
 import { selectionRange, useShiftPressed } from "../selection";
+import { RunComparison } from "./ComparePage";
 import { RunRecord } from "./RunPage";
 import type {
   Project,
@@ -278,7 +279,7 @@ function ProjectWorkspace({
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: currentUser });
   const layout = useQuery({ queryKey: ["project-layout", project.id], queryFn: ({ signal }) => api<ProjectLayout>(`/projects/${project.id}/layout`, { signal }) });
-  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set());
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set(selectedRunId ? [selectedRunId] : []));
   const selectionAnchor = useRef<string | null>(null);
   const shiftPressed = useShiftPressed();
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
@@ -408,6 +409,8 @@ function ProjectWorkspace({
     : placements[0] ?? null;
   useEffect(() => {
     if (layout.isSuccess && !showSettings && !selectedRunId && selectedPlacement) {
+      setSelectedRunIds(new Set([selectedPlacement.run.id]));
+      selectionAnchor.current = selectedPlacement.run.id;
       onSelectRun(selectedPlacement.run.id, true);
     }
   }, [layout.isSuccess, onSelectRun, selectedPlacement, selectedRunId, showSettings]);
@@ -545,7 +548,7 @@ function ProjectWorkspace({
       </aside>
       <main className="project-data-main">
         <header className="project-data-heading"><div><p className="eyebrow">{project.visibility.toUpperCase()} PROJECT</p><h2>{project.name}</h2><p>{project.description || "Simulation workspace"}</p></div>{project.visibility === "public" && <a href={`/public/${project.slug}`}>Public page ↗</a>}</header>
-        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : selectedRunId && layout.isSuccess ? <div className="project-main-empty"><span>⌁</span><h1>Run not in this project</h1><p>This project permalink no longer points to an available run.</p></div> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
+        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedIds.length > 1 ? <RunComparison ids={selectedIds} embedded /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : selectedRunId && layout.isSuccess ? <div className="project-main-empty"><span>⌁</span><h1>Run not in this project</h1><p>This project permalink no longer points to an available run.</p></div> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
       </main>
     </div>
   );

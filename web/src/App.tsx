@@ -22,6 +22,7 @@ function PrivateApp() {
     <Layout user={user.data}>
       <Switch>
         <Route path="/" component={RunsPage} />
+        <Route path="/runs/compare" component={ComparePage} />
         <Route path="/runs/:runId" component={RunPage} />
         <Route path="/jobs" component={JobsPage} />
         <Route path="/compare" component={ComparePage} />

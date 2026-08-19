@@ -54,6 +54,14 @@ function mutationError(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function selectedRunsFromLocation() {
+  if (window.location.pathname === "/runs/compare") {
+    return Object.fromEntries((new URLSearchParams(window.location.search).get("ids") ?? "").split(",").filter(Boolean).map((id) => [id, true]));
+  }
+  const match = window.location.pathname.match(/^\/runs\/([^/]+)$/);
+  return match ? { [decodeURIComponent(match[1])]: true } : {};
+}
+
 export function ArtifactStack({ run }: { run: Run }) {
   if (!run.artifact_previews.length) {
     return <span className="run-preview-empty" aria-label="No artifacts">Z</span>;
@@ -90,7 +98,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [site, setSite] = useState("");
   const [thumbnail, setThumbnail] = useState("");
   const [uncategorized, setUncategorized] = useState(false);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Record<string, boolean>>(selectedRunsFromLocation);
   const selectionAnchor = useRef<string | null>(null);
   const shiftPressed = useShiftPressed();
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
@@ -135,7 +143,25 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   });
   const data = useMemo(() => runs.data ?? [], [runs.data]);
   const sites = facets.data?.sites ?? [];
-  const selectedIds = data.filter((run) => selected[run.id]).map((run) => run.id);
+  const selectedIds = useMemo(() => Object.keys(selected).filter((id) => selected[id]), [selected]);
+  useEffect(() => {
+    const match = location.match(/^\/runs\/([^/]+)$/);
+    if (!match || match[1] === "compare") return;
+    const runId = decodeURIComponent(match[1]);
+    setSelected((current) => {
+      const currentIds = Object.keys(current).filter((id) => current[id]);
+      return currentIds.length === 1 && currentIds[0] === runId ? current : { [runId]: true };
+    });
+  }, [location]);
+  useEffect(() => {
+    if (selectedIds.length >= 2) {
+      const target = `/runs/compare?ids=${selectedIds.map(encodeURIComponent).join(",")}`;
+      const current = `${location}${window.location.search}`;
+      if (current !== target) navigate(target, { replace: location === "/runs/compare" });
+    } else if (location === "/runs/compare") {
+      navigate(selectedIds.length === 1 ? `/runs/${selectedIds[0]}` : "/", { replace: true });
+    }
+  }, [location, navigate, selectedIds]);
   const rangeAnchorId = selectionAnchor.current && selected[selectionAnchor.current]
     ? selectionAnchor.current
     : selectedIds.at(-1) ?? null;

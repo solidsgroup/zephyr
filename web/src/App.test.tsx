@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
@@ -11,6 +11,7 @@ import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
 import type { Artifact, Run, RunCopy } from "./types";
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -169,6 +170,7 @@ describe("RunBrowser", () => {
     expect(second.closest(".run-browser-item")).not.toHaveAttribute("data-range-preview");
     fireEvent.click(third, { shiftKey: true });
     expect(browser.getByRole("button", { name: "Compare 3" })).toBeInTheDocument();
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/runs/compare?ids=one,two,three"));
     expect(close).not.toHaveBeenCalled();
     fireEvent.click(browser.getByRole("button", { name: "Add to project" }));
     const project = await browser.findByRole("option", { name: "Study" });
@@ -300,7 +302,9 @@ describe("ProjectsPage", () => {
     const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
       const url = String(request);
       let body: unknown = [];
-      if (url.includes("/auth/me")) {
+      if (url.includes("/comparisons/runs")) {
+        body = { runs: projectRuns.slice(0, 3).map((item) => ({ run: item, metadata: { CASE: item.name }, thermo: [] })) };
+      } else if (url.includes("/auth/me")) {
         body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
       } else if (url.includes("/projects/project/runs/placement/batch")) {
         const request = JSON.parse(String(options?.body));
@@ -350,6 +354,8 @@ describe("ProjectsPage", () => {
     expect(window.location.pathname).toBe("/projects/study/runs/simulation-three");
     expect(runRows).toHaveLength(3);
     expect(runRows.every((row) => row.dataset.selected === "true")).toBe(true);
+    expect(await page.findByRole("heading", { name: "Compare 3 runs" })).toBeInTheDocument();
+    expect(await page.findByRole("heading", { name: "Metadata comparison" })).toBeInTheDocument();
     expect(page.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "/compare?ids=simulation,simulation-two,simulation-three");
 
     const runButton = runRows[0];
