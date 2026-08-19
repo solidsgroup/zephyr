@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { api, currentUser } from "../api";
 import { ArtifactStack } from "../components/RunBrowser";
 import PathTail from "../components/PathTail";
@@ -26,6 +26,24 @@ interface Member {
 const ROOT = "__project_root__";
 const EMPTY_RUN_IDS = new Set<string>();
 const COLLAPSED_FOLDERS_KEY = "zephyr:collapsed-project-folders";
+
+function projectPath(project: Project, runId?: string | null) {
+  const base = `/projects/${encodeURIComponent(project.slug)}`;
+  return runId ? `${base}/runs/${encodeURIComponent(runId)}` : base;
+}
+
+function projectSelectionFromLocation(location: string) {
+  const match = location.match(/^\/projects\/([^/]+)(?:\/runs\/([^/]+))?\/?$/);
+  if (!match) return { projectSlug: null, runId: null };
+  try {
+    return {
+      projectSlug: decodeURIComponent(match[1]),
+      runId: match[2] ? decodeURIComponent(match[2]) : null,
+    };
+  } catch {
+    return { projectSlug: null, runId: null };
+  }
+}
 
 function collapsedFoldersKey(projectId: string) {
   return `${COLLAPSED_FOLDERS_KEY}:${projectId}`;
@@ -244,11 +262,22 @@ function ProjectSettings({ project, owner, onDeleted }: { project: Project; owne
   );
 }
 
-function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; canEdit: boolean; onDeleted: () => void }) {
+function ProjectWorkspace({
+  project,
+  canEdit,
+  selectedRunId,
+  onSelectRun,
+  onDeleted,
+}: {
+  project: Project;
+  canEdit: boolean;
+  selectedRunId: string | null;
+  onSelectRun: (runId: string | null, replace?: boolean) => void;
+  onDeleted: () => void;
+}) {
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: currentUser });
   const layout = useQuery({ queryKey: ["project-layout", project.id], queryFn: ({ signal }) => api<ProjectLayout>(`/projects/${project.id}/layout`, { signal }) });
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(() => new Set());
   const selectionAnchor = useRef<string | null>(null);
   const shiftPressed = useShiftPressed();
@@ -280,6 +309,9 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     return () => window.clearTimeout(timer);
   }, [search]);
   useEffect(() => storeCollapsedFolders(project.id, collapsed), [collapsed, project.id]);
+  useEffect(() => {
+    if (selectedRunId) setShowSettings(false);
+  }, [selectedRunId]);
 
   const moveRuns = useMutation({
     mutationFn: ({ runIds, folderId }: { runIds: string[]; folderId: string | null }) => api<ProjectRunPlacement[]>(`/projects/${project.id}/runs/placement/batch`, {
@@ -371,7 +403,14 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
     return result;
   }, [runsByFolder, searchView]);
   const effectiveCollapsed = searchQuery ? EMPTY_RUN_IDS : collapsed;
-  const selectedPlacement = placements.find((placement) => placement.run.id === selectedRunId) ?? placements[0] ?? null;
+  const selectedPlacement = selectedRunId
+    ? placements.find((placement) => placement.run.id === selectedRunId) ?? null
+    : placements[0] ?? null;
+  useEffect(() => {
+    if (layout.isSuccess && !showSettings && !selectedRunId && selectedPlacement) {
+      onSelectRun(selectedPlacement.run.id, true);
+    }
+  }, [layout.isSuccess, onSelectRun, selectedPlacement, selectedRunId, showSettings]);
   const visibleRunIds = useMemo(() => {
     const result: string[] = [];
     const visitFolder = (folder: ProjectFolder) => {
@@ -398,7 +437,7 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
   function startRunDrag(event: DragEvent<HTMLButtonElement>, id: string) {
     const collection = selectedRunIds.has(id) && selectedIds.length > 1 ? selectedIds : [id];
     if (!selectedRunIds.has(id)) {
-      setSelectedRunId(id);
+      onSelectRun(id);
       setSelectedRunIds(new Set([id]));
       selectionAnchor.current = id;
     }
@@ -440,7 +479,7 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
   }
   function selectRun(event: MouseEvent<HTMLButtonElement>, id: string) {
     event.preventDefault();
-    setSelectedRunId(id);
+    onSelectRun(id);
     setShowSettings(false);
     if (event.shiftKey) {
       const range = selectionRange(visibleRunIds, rangeAnchorId ?? id, id);
@@ -501,12 +540,12 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
         <div className="project-sidebar-footer">
           {selectedIds.length > 1 && <div className="project-selection-summary"><span title="Drag any selected run to move the collection">{selectedIds.length} selected · drag together</span><button onClick={() => setSelectedRunIds(new Set())}>Clear</button><Link href={`/compare?ids=${selectedIds.join(",")}`}>Compare</Link></div>}
           {moveRuns.isError && <div className="project-move-error">Could not move the selected runs.</div>}
-          <button className="project-settings-button" data-active={showSettings} onClick={() => setShowSettings(true)}><span>⚙</span><span>Project settings</span></button>
+          <button className="project-settings-button" data-active={showSettings} onClick={() => { setShowSettings(true); onSelectRun(null); }}><span>⚙</span><span>Project settings</span></button>
         </div>
       </aside>
       <main className="project-data-main">
         <header className="project-data-heading"><div><p className="eyebrow">{project.visibility.toUpperCase()} PROJECT</p><h2>{project.name}</h2><p>{project.description || "Simulation workspace"}</p></div>{project.visibility === "public" && <a href={`/public/${project.slug}`}>Public page ↗</a>}</header>
-        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
+        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : selectedRunId && layout.isSuccess ? <div className="project-main-empty"><span>⌁</span><h1>Run not in this project</h1><p>This project permalink no longer points to an available run.</p></div> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
       </main>
     </div>
   );
@@ -514,30 +553,49 @@ function ProjectWorkspace({ project, canEdit, onDeleted }: { project: Project; c
 
 export default function ProjectsPage() {
   const queryClient = useQueryClient();
+  const [location, navigate] = useLocation();
+  const routeSelection = projectSelectionFromLocation(location);
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => api<Project[]>("/projects") });
   const editableProjects = useQuery({ queryKey: ["projects", "editable"], queryFn: () => api<Project[]>("/projects?editable=true") });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [visibility, setVisibility] = useState<Project["visibility"]>("private");
   const create = useMutation({
     mutationFn: () => api<Project>("/projects", { method: "POST", body: JSON.stringify({ name, slug, visibility }) }),
-    onSuccess: (project) => { queryClient.invalidateQueries({ queryKey: ["projects"] }); setSelectedId(project.id); setShowCreate(false); setName(""); setSlug(""); },
+    onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(["projects"], (current) => [...(current ?? []).filter((item) => item.id !== project.id), project]);
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      navigate(projectPath(project));
+      setShowCreate(false);
+      setName("");
+      setSlug("");
+    },
   });
-  const selected = projects.data?.find((project) => project.id === selectedId) ?? projects.data?.[0];
+  const selected = routeSelection.projectSlug
+    ? projects.data?.find((project) => project.slug === routeSelection.projectSlug)
+    : projects.data?.[0];
   const editableIds = new Set((editableProjects.data ?? []).map((project) => project.id));
+  useEffect(() => {
+    if (!routeSelection.projectSlug && selected) navigate(projectPath(selected), { replace: true });
+  }, [navigate, routeSelection.projectSlug, selected]);
   return (
     <div className="projects-page">
       <header className="project-selector-bar">
         <div>
           <p className="eyebrow">PROJECT WORKSPACE</p>
-          {selected ? <select aria-label="Select project" value={selected.id} onChange={(event) => setSelectedId(event.target.value)}>{projects.data?.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select> : <h1>Projects</h1>}
+          {selected ? <select aria-label="Select project" value={selected.id} onChange={(event) => {
+            const project = projects.data?.find((item) => item.id === event.target.value);
+            if (project) navigate(projectPath(project));
+          }}>{projects.data?.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select> : <h1>Projects</h1>}
         </div>
         <button onClick={() => setShowCreate(!showCreate)}>＋ New project</button>
       </header>
       {showCreate && <div className="project-create-bar"><label>Name<input autoFocus value={name} onChange={(event) => { const next = event.target.value; setName(next); setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")); }} /></label><label>URL slug<input value={slug} onChange={(event) => setSlug(event.target.value)} /></label><label>Visibility<select value={visibility} onChange={(event) => setVisibility(event.target.value as Project["visibility"])}><option value="private">Private</option><option value="group">Group</option><option value="public">Public</option></select></label><button onClick={() => setShowCreate(false)}>Cancel</button><button className="primary" disabled={!name || slug.length < 3 || create.isPending} onClick={() => create.mutate()}>Create project</button></div>}
-      {projects.isPending ? <div className="workspace-state"><span className="spinner" />Loading projects…</div> : selected ? <ProjectWorkspace key={selected.id} project={selected} canEdit={editableIds.has(selected.id)} onDeleted={() => setSelectedId(null)} /> : <div className="project-main-empty"><span>⌁</span><h1>Create your first project</h1><p>Projects organize simulation records into a shared working space.</p></div>}
+      {projects.isPending ? <div className="workspace-state"><span className="spinner" />Loading projects…</div> : routeSelection.projectSlug && !selected ? <div className="project-main-empty"><span>⌁</span><h1>Project not found</h1><p>This project permalink is unavailable or you no longer have access.</p></div> : selected ? <ProjectWorkspace key={selected.id} project={selected} canEdit={editableIds.has(selected.id)} selectedRunId={routeSelection.runId} onSelectRun={(runId, replace = false) => navigate(projectPath(selected, runId), { replace })} onDeleted={() => {
+        queryClient.setQueryData<Project[]>(["projects"], (current) => current?.filter((project) => project.id !== selected.id));
+        navigate("/projects", { replace: true });
+      }} /> : <div className="project-main-empty"><span>⌁</span><h1>Create your first project</h1><p>Projects organize simulation records into a shared working space.</p></div>}
     </div>
   );
 }

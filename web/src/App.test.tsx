@@ -15,6 +15,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.localStorage.clear();
+  window.history.replaceState(null, "", "/");
 });
 
 function run(id: string, name: string): Run {
@@ -283,16 +284,18 @@ describe("RunBrowser", () => {
 describe("ProjectsPage", () => {
   it("shows the full record, selects ranges, and moves a run by drag and drop", async () => {
     const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
+    const otherProject = { id: "other-project", owner_id: "owner", slug: "other-study", name: "Other study", description: "More data", visibility: "private" };
     const projectRun = { ...run("simulation", "Simulation one"), output_path: "/scratch/alamo-runs/results/output.one" };
     const secondRun = { ...run("simulation-two", "Simulation two"), output_path: "/scratch/alamo-runs/results/output.two" };
     const thirdRun = { ...run("simulation-three", "Simulation three"), output_path: "/scratch/alamo-runs/results/output.three" };
-    const projectRuns = [projectRun, secondRun, thirdRun];
+    const otherRun = { ...run("other-simulation", "Other simulation"), output_path: "/scratch/alamo-runs/results/output.other" };
+    const projectRuns = [projectRun, secondRun, thirdRun, otherRun];
     const layout = {
       folders: [
         { id: "cases", project_id: "project", parent_id: null, name: "Cases", position: 0 },
         { id: "gpu", project_id: "project", parent_id: "cases", name: "GPU", position: 0 },
       ],
-      runs: projectRuns.map((item, position) => ({ run: item, folder_id: null, position })),
+      runs: projectRuns.slice(0, 3).map((item, position) => ({ run: item, folder_id: null, position })),
     };
     const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
       const url = String(request);
@@ -302,10 +305,12 @@ describe("ProjectsPage", () => {
       } else if (url.includes("/projects/project/runs/placement/batch")) {
         const request = JSON.parse(String(options?.body));
         body = request.run_ids.map((id: string, position: number) => ({ run: projectRuns.find((item) => item.id === id), folder_id: "gpu", position }));
+      } else if (url.includes("/projects/other-project/layout")) {
+        body = { folders: [], runs: [{ run: otherRun, folder_id: null, position: 0 }] };
       } else if (url.includes("/projects/project/layout")) {
         body = layout;
       } else if (url.includes("/projects")) {
-        body = [project];
+        body = [project, otherProject];
       } else if (url.includes("/runs?") && url.includes("search=")) {
         body = [secondRun];
       } else if (url.includes("/runs/") && url.endsWith("/artifacts")) {
@@ -317,6 +322,7 @@ describe("ProjectsPage", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: options?.method === "DELETE" ? 204 : 200, headers: { "Content-Type": "application/json" } }));
     });
     vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/projects/study/runs/simulation-two");
     window.localStorage.setItem("zephyr:collapsed-project-folders:project", JSON.stringify(["cases"]));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(["me"], { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null });
@@ -326,6 +332,7 @@ describe("ProjectsPage", () => {
     expect(await page.findByRole("combobox", { name: "Select project" })).toHaveValue("project");
     expect(await page.findByRole("button", { name: "stdout" })).toBeInTheDocument();
     expect(page.getByRole("button", { name: "git diff" })).toBeInTheDocument();
+    expect(view.container.querySelector(".project-run-row[data-active='true']")).toHaveTextContent("Simulation two");
     const casesButton = (await page.findByText("Cases")).closest("button")!;
     expect(page.queryByText("GPU")).not.toBeInTheDocument();
     fireEvent.click(casesButton);
@@ -334,11 +341,13 @@ describe("ProjectsPage", () => {
 
     const runRows = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".project-run-row"));
     fireEvent.click(runRows[0]);
+    expect(window.location.pathname).toBe("/projects/study/runs/simulation");
     fireEvent.keyDown(window, { key: "Shift" });
     fireEvent.mouseEnter(runRows[2]);
     expect(runRows.every((row) => row.dataset.rangePreview === "true")).toBe(true);
     fireEvent.keyUp(window, { key: "Shift" });
     fireEvent.click(runRows[2], { shiftKey: true });
+    expect(window.location.pathname).toBe("/projects/study/runs/simulation-three");
     expect(runRows).toHaveLength(3);
     expect(runRows.every((row) => row.dataset.selected === "true")).toBe(true);
     expect(page.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "/compare?ids=simulation,simulation-two,simulation-three");
@@ -361,6 +370,10 @@ describe("ProjectsPage", () => {
     expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
     expect(page.getByText("Cases")).toBeInTheDocument();
     expect(page.getByText("GPU")).toBeInTheDocument();
+
+    fireEvent.change(page.getByLabelText("Select project"), { target: { value: "other-project" } });
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/other-study/runs/other-simulation"));
+    expect(await page.findByText("Other simulation")).toBeInTheDocument();
   });
 });
 

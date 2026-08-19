@@ -25,6 +25,7 @@ function PrivateApp() {
         <Route path="/runs/:runId" component={RunPage} />
         <Route path="/jobs" component={JobsPage} />
         <Route path="/compare" component={ComparePage} />
+        <Route path="/projects/:projectSlug/*?" component={ProjectsPage} />
         <Route path="/projects" component={ProjectsPage} />
         <Route path="/settings/*?" component={SettingsPage} />
         <Route><Redirect to="/" replace /></Route>

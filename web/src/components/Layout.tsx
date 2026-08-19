@@ -15,7 +15,7 @@ export default function Layout({ user, children }: { user: User; children: React
   const [location] = useLocation();
   const [runBrowserOpen, setRunBrowserOpen] = useState(false);
   const runWorkspace = location === "/" || location.startsWith("/runs/");
-  const projectWorkspace = location === "/projects";
+  const projectWorkspace = location === "/projects" || location.startsWith("/projects/");
   const active = (path: string, exact = false) =>
     exact ? location === path : location === path || location.startsWith(`${path}/`);
   return (
