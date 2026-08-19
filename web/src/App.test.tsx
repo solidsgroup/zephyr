@@ -287,9 +287,9 @@ describe("ProjectsPage", () => {
   it("shows the full record, selects ranges, and moves a run by drag and drop", async () => {
     const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
     const otherProject = { id: "other-project", owner_id: "owner", slug: "other-study", name: "Other study", description: "More data", visibility: "private" };
-    const projectRun = { ...run("simulation", "Simulation one"), output_path: "/scratch/alamo-runs/results/output.one" };
-    const secondRun = { ...run("simulation-two", "Simulation two"), output_path: "/scratch/alamo-runs/results/output.two" };
-    const thirdRun = { ...run("simulation-three", "Simulation three"), output_path: "/scratch/alamo-runs/results/output.three" };
+    const projectRun = { ...run("simulation", "Simulation one"), output_path: "/scratch/alamo-runs/results/output.one", scheduler_system: "slurm", scheduler_job_id: "101", scheduler_details: { partition: "gpu", job_name: "simulation-one" } };
+    const secondRun = { ...run("simulation-two", "Simulation two"), output_path: "/scratch/alamo-runs/results/output.two", scheduler_system: "slurm", scheduler_job_id: "102", scheduler_details: { partition: "gpu", job_name: "simulation-two" } };
+    const thirdRun = { ...run("simulation-three", "Simulation three"), output_path: "/scratch/alamo-runs/results/output.three", scheduler_system: "slurm", scheduler_job_id: "103", scheduler_details: { partition: "gpu", job_name: "simulation-three" } };
     const otherRun = { ...run("other-simulation", "Other simulation"), output_path: "/scratch/alamo-runs/results/output.other" };
     const projectRuns = [projectRun, secondRun, thirdRun, otherRun];
     const layout = {
@@ -303,7 +303,7 @@ describe("ProjectsPage", () => {
       const url = String(request);
       let body: unknown = [];
       if (url.includes("/comparisons/runs")) {
-        body = { runs: projectRuns.slice(0, 3).map((item) => ({ run: item, metadata: { CASE: item.name }, thermo: [] })) };
+        body = { runs: projectRuns.slice(0, 3).map((item) => ({ run: item, metadata: { CASE: item.name, DIM: "3" }, thermo: [] })) };
       } else if (url.includes("/auth/me")) {
         body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
       } else if (url.includes("/projects/project/runs/placement/batch")) {
@@ -355,7 +355,19 @@ describe("ProjectsPage", () => {
     expect(runRows).toHaveLength(3);
     expect(runRows.every((row) => row.dataset.selected === "true")).toBe(true);
     expect(await page.findByRole("heading", { name: "Compare 3 runs" })).toBeInTheDocument();
-    expect(await page.findByRole("heading", { name: "Metadata comparison" })).toBeInTheDocument();
+    const thermoSection = (await page.findByRole("heading", { name: "Thermodynamics" })).closest("details");
+    expect(thermoSection).not.toHaveAttribute("open");
+    expect(page.getByRole("heading", { name: "Run provenance" }).closest("details")).toHaveAttribute("open");
+    const metadataSection = (await page.findByRole("heading", { name: "Metadata comparison" })).closest("details")!;
+    expect(metadataSection).toHaveAttribute("open");
+    expect(page.getByText("SLURM · Partition")).toBeInTheDocument();
+    expect(page.getByText("DIM")).toBeInTheDocument();
+    fireEvent.click(page.getByRole("checkbox", { name: "Hide similar" }));
+    expect(page.queryByText("SLURM · Partition")).not.toBeInTheDocument();
+    expect(page.queryByText("DIM")).not.toBeInTheDocument();
+    expect(page.getByText("SLURM · Job Name")).toBeInTheDocument();
+    fireEvent.click(metadataSection.querySelector("summary")!);
+    await waitFor(() => expect(metadataSection).not.toHaveAttribute("open"));
     expect(page.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "/compare?ids=simulation,simulation-two,simulation-three");
 
     const runButton = runRows[0];

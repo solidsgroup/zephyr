@@ -13,6 +13,7 @@ export default function ThermoPlot({ runs }: { runs: PlotRun[] }) {
     () => Array.from(new Set(runs.flatMap(({ thermo }) => thermo.flatMap((series) => series.columns)))),
     [runs],
   );
+  const hasRows = runs.some(({ thermo }) => thermo.some((series) => series.rows.length > 0));
   const defaultX = columns.find((column) => /^(time|step|cycle)$/i.test(column)) ?? columns[0];
   const defaultY = columns.find((column) => column !== defaultX) ?? columns[0];
   const [xColumn, setXColumn] = useState(defaultX);
@@ -53,7 +54,7 @@ export default function ThermoPlot({ runs }: { runs: PlotRun[] }) {
       Plotly.purge(element);
     };
   }, [columns.length, traces, xColumn, yColumn]);
-  if (!columns.length) return <div className="empty-panel">No thermo data has been posted yet.</div>;
+  if (!columns.length || !hasRows) return <div className="empty-panel">No thermo data has been posted yet.</div>;
   return (
     <div>
       <div className="plot-controls">
