@@ -399,7 +399,16 @@ describe("ProjectsPage", () => {
       const url = String(request);
       let body: unknown = [];
       if (url.includes("/comparisons/runs")) {
-        body = { runs: projectRuns.slice(0, 3).map((item) => ({ run: item, metadata: { CASE: item.name, DIM: "3" }, thermo: [] })) };
+        body = { runs: projectRuns.slice(0, 3).map((item) => ({
+          run: item,
+          metadata: { Compiler: item.name, Status: "Complete", CASE: item.name, DIM: "3" },
+          metadata_sections: {
+            "Compilation Details": ["Compiler"],
+            "Run Details": ["Status"],
+            Parameters: ["CASE", "DIM"],
+          },
+          thermo: [],
+        })) };
       } else if (url.includes("/auth/me")) {
         body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
       } else if (url.includes("/projects/project/runs/placement/batch")) {
@@ -454,8 +463,16 @@ describe("ProjectsPage", () => {
     const thermoSection = (await page.findByRole("heading", { name: "Thermodynamics" })).closest("details");
     expect(thermoSection).not.toHaveAttribute("open");
     expect(page.getByRole("heading", { name: "Run provenance" }).closest("details")).toHaveAttribute("open");
+    const compilationSection = (await page.findByRole("heading", { name: "Compilation details" })).closest("details")!;
+    const runDetailsSection = page.getByRole("heading", { name: "Run details" }).closest("details")!;
     const metadataSection = (await page.findByRole("heading", { name: "Metadata comparison" })).closest("details")!;
+    expect(compilationSection).toHaveAttribute("open");
+    expect(runDetailsSection).toHaveAttribute("open");
     expect(metadataSection).toHaveAttribute("open");
+    expect(within(compilationSection).getByText("Compiler")).toBeInTheDocument();
+    expect(within(runDetailsSection).getByText("Status")).toBeInTheDocument();
+    expect(within(metadataSection).queryByText("Compiler")).not.toBeInTheDocument();
+    expect(within(metadataSection).queryByText("Status")).not.toBeInTheDocument();
     expect(page.getByText("SLURM · Partition")).toBeInTheDocument();
     expect(page.getByText("DIM")).toBeInTheDocument();
     fireEvent.click(page.getByRole("checkbox", { name: "Hide similar" }));

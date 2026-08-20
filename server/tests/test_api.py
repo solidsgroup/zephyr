@@ -321,6 +321,15 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
             project_run = next(item for item in project_runs.json() if item["id"] == run_id)
             assert project_run["copy_count"] == 2
+            comparison = await client.get(
+                "/api/v1/comparisons/runs",
+                params=[("ids", run_id), ("ids", batch_run_id)],
+            )
+            assert comparison.status_code == 200
+            compared_run = next(
+                item for item in comparison.json()["runs"] if item["run"]["id"] == run_id
+            )
+            assert "HASH" in compared_run["metadata_sections"]["General"]
 
             cases_folder = await client.post(
                 f"/api/v1/projects/{project_id}/folders",

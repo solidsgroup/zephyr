@@ -6,7 +6,37 @@ import MetadataTable from "../components/MetadataTable";
 import ThermoPlot from "../components/ThermoPlot";
 import type { Run, ThermoSeries } from "../types";
 
-interface ComparisonItem { run: Run; metadata: Record<string, string>; thermo: ThermoSeries[] }
+interface ComparisonItem {
+  run: Run;
+  metadata: Record<string, string>;
+  metadata_sections?: Record<string, string[]>;
+  thermo: ThermoSeries[];
+}
+
+const dedicatedMetadataSections = ["Compilation Details", "Run Details"];
+
+function metadataSectionKeys(item: ComparisonItem, section: string) {
+  return Object.entries(item.metadata_sections ?? {}).find(
+    ([name]) => name.toLocaleLowerCase() === section.toLocaleLowerCase(),
+  )?.[1] ?? [];
+}
+
+function metadataSectionValues(item: ComparisonItem, section: string) {
+  return Object.fromEntries(
+    metadataSectionKeys(item, section)
+      .filter((key) => Object.hasOwn(item.metadata, key))
+      .map((key) => [key, item.metadata[key]]),
+  );
+}
+
+function remainingMetadataValues(item: ComparisonItem) {
+  const dedicatedKeys = new Set(
+    dedicatedMetadataSections.flatMap((section) => metadataSectionKeys(item, section)),
+  );
+  return Object.fromEntries(
+    Object.entries(item.metadata).filter(([key]) => !dedicatedKeys.has(key)),
+  );
+}
 
 function displayField(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -90,8 +120,14 @@ export function RunComparison({ ids, embedded = false }: { ids: string[]; embedd
         <ComparisonSection eyebrow="PROVENANCE" title="Run provenance" note="Differences highlighted">
           <MetadataTable hideSimilar={hideSimilar} records={comparison.data.runs.map((item) => ({ name: item.run.name, values: runProvenance(item.run) }))} />
         </ComparisonSection>
+        <ComparisonSection eyebrow="ALAMO METADATA" title="Compilation details" note="Differences highlighted">
+          <MetadataTable hideSimilar={hideSimilar} records={comparison.data.runs.map((item) => ({ name: item.run.name, values: metadataSectionValues(item, "Compilation Details") }))} />
+        </ComparisonSection>
+        <ComparisonSection eyebrow="ALAMO METADATA" title="Run details" note="Differences highlighted">
+          <MetadataTable hideSimilar={hideSimilar} records={comparison.data.runs.map((item) => ({ name: item.run.name, values: metadataSectionValues(item, "Run Details") }))} />
+        </ComparisonSection>
         <ComparisonSection eyebrow="ALAMO METADATA" title="Metadata comparison" note="Differences highlighted">
-          <MetadataTable hideSimilar={hideSimilar} records={comparison.data.runs.map((item) => ({ name: item.run.name, values: item.metadata }))} />
+          <MetadataTable hideSimilar={hideSimilar} records={comparison.data.runs.map((item) => ({ name: item.run.name, values: remainingMetadataValues(item) }))} />
         </ComparisonSection>
       </>}
     </>

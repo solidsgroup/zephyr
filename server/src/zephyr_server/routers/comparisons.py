@@ -49,6 +49,7 @@ async def compare_runs(
                     copy_count=copy_counts.get(run.id, 0),
                 ),
                 "metadata": metadata.values if metadata else {},
+                "metadata_sections": metadata.sections if metadata else {},
                 "thermo": [
                     {
                         "segment": item.segment,
