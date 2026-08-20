@@ -15,6 +15,15 @@ class UserRead(BaseModel):
     picture_url: str | None
 
 
+class GoogleAccountRead(BaseModel):
+    id: uuid.UUID | None
+    email: EmailStr
+    name: str
+    picture_url: str | None
+    is_primary: bool
+    linked_at: datetime
+
+
 class TokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     expires_at: datetime | None = None

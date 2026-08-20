@@ -7,6 +7,7 @@ import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
 import PathTail from "./components/PathTail";
 import JobsPage from "./pages/JobsPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import SettingsPage from "./pages/SettingsPage";
 import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
 import type { Artifact, Run, RunCopy } from "./types";
 
@@ -54,6 +55,39 @@ describe("StatusPill", () => {
   it("shows the effective run state", () => {
     render(<StatusPill status="unreachable" />);
     expect(screen.getByLabelText("unreachable")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage", () => {
+  it("shows the required primary account and lets users unlink an alternate", async () => {
+    window.history.replaceState(null, "", "/settings?google_link=linked");
+    const accounts = [
+      { id: null, email: "owner@solids.group", name: "Owner", picture_url: null, is_primary: true, linked_at: "2026-08-01T12:00:00Z" },
+      { id: "linked-account", email: "owner@gmail.com", name: "Owner", picture_url: null, is_primary: false, linked_at: "2026-08-20T12:00:00Z" },
+    ];
+    const fetchMock = vi.fn((request: RequestInfo | URL, options?: RequestInit) => {
+      const url = String(request);
+      if (options?.method === "DELETE") return Promise.resolve(new Response(null, { status: 204 }));
+      const body = url.endsWith("/auth/google-accounts") ? accounts : [];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><SettingsPage /></QueryClientProvider>);
+
+    expect(await screen.findByText("owner@solids.group")).toBeInTheDocument();
+    expect(screen.getByText("owner@gmail.com")).toBeInTheDocument();
+    expect(screen.getByText("Primary · required @solids.group account")).toBeInTheDocument();
+    expect(screen.getByText("Google account linked. You can now use it to sign in.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Link Google account" })).toHaveAttribute("href", "/api/v1/auth/google-accounts/link");
+    expect(screen.getAllByRole("button", { name: "Unlink" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/google-accounts/linked-account",
+      expect.objectContaining({ method: "DELETE" }),
+    ));
   });
 });
 

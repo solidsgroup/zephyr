@@ -23,7 +23,7 @@ export default function LoginPage() {
         <h1>Keep every Alamo run in sight.</h1>
         <p className="login-copy">Execution health, provenance, results, and reproducible artifacts in one shared workspace.</p>
         <a className="button button-primary button-large" href="/api/v1/auth/login">Continue with Google</a>
-        <p className="login-note">Access is limited to <strong>@solids.group</strong> accounts.</p>
+        <p className="login-note">Start with your <strong>@solids.group</strong> account. You can link other Google accounts afterward.</p>
         {meta.data?.development_login && <button className="button button-quiet" onClick={devLogin}>Local developer login</button>}
       </section>
     </div>

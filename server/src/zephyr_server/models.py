@@ -50,6 +50,24 @@ class User(TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     tokens: Mapped[list[ApiToken]] = relationship(back_populates="user", cascade="all, delete")
+    linked_google_accounts: Mapped[list[LinkedGoogleAccount]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class LinkedGoogleAccount(TimestampMixin, Base):
+    __tablename__ = "linked_google_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    google_subject: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    name: Mapped[str] = mapped_column(String(200), default="")
+    picture_url: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="linked_google_accounts")
 
 
 class ApiToken(TimestampMixin, Base):

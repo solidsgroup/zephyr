@@ -5,6 +5,15 @@ export interface User {
   picture_url: string | null;
 }
 
+export interface GoogleAccount {
+  id: string | null;
+  email: string;
+  name: string;
+  picture_url: string | null;
+  is_primary: boolean;
+  linked_at: string;
+}
+
 export interface Run {
   id: string;
   owner_id: string;

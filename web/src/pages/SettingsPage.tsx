@@ -1,10 +1,20 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { ApiToken } from "../types";
+import type { ApiToken, GoogleAccount } from "../types";
+
+const googleLinkMessages: Record<string, string> = {
+  linked: "Google account linked. You can now use it to sign in.",
+  "already-primary": "That is already your primary Google account.",
+  "in-use": "That Google account is already attached to another Zephyr user.",
+};
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
+  const accounts = useQuery({
+    queryKey: ["google-accounts"],
+    queryFn: () => api<GoogleAccount[]>("/auth/google-accounts"),
+  });
   const tokens = useQuery({ queryKey: ["tokens"], queryFn: () => api<ApiToken[]>("/auth/tokens") });
   const [name, setName] = useState("My workstation");
   const [created, setCreated] = useState<string | null>(null);
@@ -16,10 +26,28 @@ export default function SettingsPage() {
     mutationFn: (id: string) => api(`/auth/tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tokens"] }),
   });
+  const unlink = useMutation({
+    mutationFn: (id: string) => api(`/auth/google-accounts/${id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["google-accounts"] }),
+  });
+  const googleLinkResult = new URLSearchParams(window.location.search).get("google_link");
   const logout = async () => { await api("/auth/logout", { method: "POST" }); window.location.assign("/login"); };
   return (
     <>
       <header className="page-header"><div><p className="eyebrow">ACCOUNT</p><h1>Settings</h1><p>Credentials for the web dashboard and <code>zph</code>.</p></div><button className="button" onClick={logout}>Sign out</button></header>
+      <section className="panel settings-panel google-accounts-panel">
+        <div className="panel-heading"><div><h2>Google accounts</h2><p>Your primary <strong>@solids.group</strong> account controls Zephyr access. Link other Google accounts to use them as alternate sign-ins.</p></div><a className="button button-primary" href="/api/v1/auth/google-accounts/link">Link Google account</a></div>
+        {googleLinkResult && googleLinkMessages[googleLinkResult] && <div className={`account-link-notice${googleLinkResult === "linked" ? " success" : ""}`}>{googleLinkMessages[googleLinkResult]}</div>}
+        {accounts.isError && <div className="account-link-notice">Google accounts could not be loaded.</div>}
+        <div className="compact-list google-account-list">
+          {accounts.data?.map((account) => <div key={account.id ?? "primary"}>
+            {account.picture_url ? <img className="account-avatar" src={account.picture_url} alt="" /> : <span className="account-avatar account-avatar-fallback">G</span>}
+            <span><strong>{account.email}</strong><small>{account.is_primary ? "Primary · required @solids.group account" : `Linked ${new Date(account.linked_at).toLocaleDateString()}`}</small></span>
+            {account.is_primary ? <span className="account-primary-badge">Primary</span> : <button className="button button-danger" disabled={unlink.isPending && unlink.variables === account.id} onClick={() => account.id && unlink.mutate(account.id)}>Unlink</button>}
+          </div>)}
+        </div>
+        {unlink.isError && <div className="account-link-notice">The linked account could not be removed.</div>}
+      </section>
       <section className="panel settings-panel"><div className="panel-heading"><div><h2>CLI tokens</h2><p>Tokens grant the same access as your account. Store them like passwords.</p></div></div>
         <div className="inline-form token-create"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Token name" /><button className="button button-primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Create token</button></div>
         {created && <div className="token-reveal"><strong>Copy this token now — it will not be shown again.</strong><code>{created}</code><button className="button" onClick={() => navigator.clipboard.writeText(created)}>Copy</button></div>}
