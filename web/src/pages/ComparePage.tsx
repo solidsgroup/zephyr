@@ -39,6 +39,7 @@ function runProvenance(run: Run) {
     "Organization · Notes": run.notes,
     "Record · Created": displayTime(run.created_at),
     "Record · Updated": displayTime(run.updated_at),
+    "Copies · Count": String(run.copy_count),
     "Artifacts · Count": String(run.artifact_count),
   };
   const schedulerLabel = run.scheduler_system?.toLocaleLowerCase() === "slurm" ? "SLURM" : "Scheduler";

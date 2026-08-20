@@ -97,6 +97,9 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
   const [status, setStatus] = useState("");
   const [site, setSite] = useState("");
   const [thumbnail, setThumbnail] = useState("");
+  const [copies, setCopies] = useState("");
+  const [artifacts, setArtifacts] = useState("");
+  const [sort, setSort] = useState("updated");
   const [uncategorized, setUncategorized] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>(selectedRunsFromLocation);
   const selectionAnchor = useRef<string | null>(null);
@@ -126,12 +129,15 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     if (status) query.set("status", status);
     if (site) query.set("site", site);
     if (thumbnail) query.set("has_thumbnail", thumbnail);
+    if (copies) query.set("has_copies", copies);
+    if (artifacts) query.set("has_artifacts", artifacts);
+    if (sort !== "updated") query.set("sort", sort);
     if (uncategorized) query.set("uncategorized", "true");
     const suffix = query.toString();
     return `/runs${suffix ? `?${suffix}` : ""}`;
-  }, [searchQuery, site, status, thumbnail, uncategorized]);
+  }, [artifacts, copies, searchQuery, site, sort, status, thumbnail, uncategorized]);
   const runs = useQuery({
-    queryKey: ["runs", "browser", searchQuery, status, site, thumbnail, uncategorized],
+    queryKey: ["runs", "browser", searchQuery, status, site, thumbnail, copies, artifacts, sort, uncategorized],
     queryFn: ({ signal }) => api<Run[]>(runsPath, { signal }),
     refetchInterval: 15_000,
     placeholderData: (previous) => previous,
@@ -296,6 +302,25 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
             <option value="false">No thumbnail</option>
           </select>
         </div>
+        <div className="run-filter-row run-inventory-filters">
+          <select value={copies} onChange={(event) => setCopies(event.target.value)} aria-label="Filter copies">
+            <option value="">Any copies</option>
+            <option value="true">Has copies</option>
+            <option value="false">No copies</option>
+          </select>
+          <select value={artifacts} onChange={(event) => setArtifacts(event.target.value)} aria-label="Filter artifacts">
+            <option value="">Any artifacts</option>
+            <option value="true">Has artifacts</option>
+            <option value="false">No artifacts</option>
+          </select>
+          <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort runs">
+            <option value="updated">Recently updated</option>
+            <option value="copies_desc">Most copies</option>
+            <option value="copies_asc">Fewest copies</option>
+            <option value="artifacts_desc">Most artifacts</option>
+            <option value="artifacts_asc">Fewest artifacts</option>
+          </select>
+        </div>
         <button className="run-category-filter" aria-pressed={uncategorized} onClick={() => setUncategorized((value) => !value)}>
           <span aria-hidden="true">⌁</span>
           <strong>Uncategorized only</strong>
@@ -327,7 +352,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
                   <div className="run-artifact-slot"><ArtifactStack run={run} /></div>
                   <div className="run-browser-copy">
                     <div><strong title={run.name}>{run.name}</strong><StatusPill status={run.effective_status} /></div>
-                    <small>{run.host ?? "Unknown host"}<span>·</span>{age(run.last_heartbeat)}</small>
+                    <small>{run.host ?? "Unknown host"}<span>·</span>{age(run.last_heartbeat)}<span>·</span>{run.copy_count} {run.copy_count === 1 ? "copy" : "copies"}<span>·</span>{run.artifact_count} {run.artifact_count === 1 ? "artifact" : "artifacts"}</small>
                     {run.progress != null && <span className="run-browser-progress"><i style={{ width: `${run.progress}%` }} /></span>}
                   </div>
                 </Link>

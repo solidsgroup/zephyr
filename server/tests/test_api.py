@@ -193,6 +193,11 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert run_id in {run["id"] for run in searched_copy_path.json()}
             filtered_site = await client.get("/api/v1/runs", params={"site": "stampede3"})
             assert run_id in {run["id"] for run in filtered_site.json()}
+            listed_with_copies = await client.get(
+                "/api/v1/runs", params={"has_copies": "true"}
+            )
+            listed_copy = next(run for run in listed_with_copies.json() if run["id"] == run_id)
+            assert listed_copy["copy_count"] == 2
             facets = await client.get("/api/v1/runs/facets")
             assert facets.status_code == 200
             site_counts = {item["site"]: item["run_count"] for item in facets.json()["sites"]}
@@ -286,6 +291,16 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert batch_run.status_code == 201
             batch_run_id = batch_run.json()["id"]
+            without_copies = await client.get(
+                "/api/v1/runs", params={"has_copies": "false"}
+            )
+            assert batch_run_id in {item["id"] for item in without_copies.json()}
+            assert run_id not in {item["id"] for item in without_copies.json()}
+            by_copies = await client.get(
+                "/api/v1/runs", params={"sort": "copies_desc", "limit": 1000}
+            )
+            copy_order = [item["id"] for item in by_copies.json()]
+            assert copy_order.index(run_id) < copy_order.index(batch_run_id)
             uncategorized = await client.get("/api/v1/runs", params={"uncategorized": "true"})
             assert uncategorized.status_code == 200
             assert batch_run_id in {item["id"] for item in uncategorized.json()}
@@ -304,6 +319,8 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert batch_run_id not in {item["id"] for item in uncategorized_after_add.json()}
             project_runs = await client.get(f"/api/v1/projects/{project_id}/runs")
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
+            project_run = next(item for item in project_runs.json() if item["id"] == run_id)
+            assert project_run["copy_count"] == 2
 
             cases_folder = await client.post(
                 f"/api/v1/projects/{project_id}/folders",

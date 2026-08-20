@@ -175,6 +175,30 @@ def test_sync_parser_defaults_to_current_directory() -> None:
     assert args.deep is False
 
 
+def test_sync_dry_run_does_not_contact_server_or_write_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write_copy(tmp_path / "output", "hash-one")
+    monkeypatch.setattr(
+        main,
+        "configured_client",
+        lambda: pytest.fail("a sync dry run must not configure a client"),
+    )
+    monkeypatch.setattr(
+        main,
+        "save_sync_cache",
+        lambda _cache: pytest.fail("a sync dry run must not write its cache"),
+    )
+
+    main.cmd_sync(argparse.Namespace(paths=[str(tmp_path)], deep=False, dry_run=True))
+
+    output = capsys.readouterr().out
+    assert "1 locations would be updated" in output
+    assert "no server or cache changes were made" in output
+
+
 def test_batch_copy_update_falls_back_for_an_older_server() -> None:
     requests: list[tuple[str, str, object | None]] = []
 

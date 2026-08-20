@@ -37,6 +37,7 @@ export interface Run {
   tags: string[];
   notes: string;
   thumbnail_artifact_id: string | null;
+  copy_count: number;
   artifact_count: number;
   artifact_previews: ArtifactPreview[];
   created_at: string;

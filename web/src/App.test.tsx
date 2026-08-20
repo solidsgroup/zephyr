@@ -46,6 +46,7 @@ function run(id: string, name: string): Run {
     tags: [],
     notes: "",
     thumbnail_artifact_id: null,
+    copy_count: 0,
     artifact_count: 0,
     artifact_previews: [],
     created_at: "2026-08-03T20:00:00Z",
@@ -276,6 +277,9 @@ describe("RunBrowser", () => {
     fireEvent.change(browser.getByLabelText("Search runs"), { target: { value: ".gif" } });
     fireEvent.change(browser.getByLabelText("Filter storage site"), { target: { value: "stampede3" } });
     fireEvent.change(browser.getByLabelText("Filter thumbnail"), { target: { value: "true" } });
+    fireEvent.change(browser.getByLabelText("Filter copies"), { target: { value: "false" } });
+    fireEvent.change(browser.getByLabelText("Filter artifacts"), { target: { value: "true" } });
+    fireEvent.change(browser.getByLabelText("Sort runs"), { target: { value: "artifacts_desc" } });
     fireEvent.click(browser.getByRole("button", { name: /Uncategorized only/ }));
 
     await waitFor(() => {
@@ -284,6 +288,9 @@ describe("RunBrowser", () => {
         url.includes("search=.gif")
         && url.includes("site=stampede3")
         && url.includes("has_thumbnail=true")
+        && url.includes("has_copies=false")
+        && url.includes("has_artifacts=true")
+        && url.includes("sort=artifacts_desc")
         && url.includes("uncategorized=true"),
       )).toBe(true);
     });
@@ -354,9 +361,9 @@ describe("ProjectsPage", () => {
   it("shows the full record, selects ranges, and moves a run by drag and drop", async () => {
     const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
     const otherProject = { id: "other-project", owner_id: "owner", slug: "other-study", name: "Other study", description: "More data", visibility: "private" };
-    const projectRun = { ...run("simulation", "Simulation one"), output_path: "/scratch/alamo-runs/results/output.one", scheduler_system: "slurm", scheduler_job_id: "101", scheduler_details: { partition: "gpu", job_name: "simulation-one" } };
-    const secondRun = { ...run("simulation-two", "Simulation two"), output_path: "/scratch/alamo-runs/results/output.two", scheduler_system: "slurm", scheduler_job_id: "102", scheduler_details: { partition: "gpu", job_name: "simulation-two" } };
-    const thirdRun = { ...run("simulation-three", "Simulation three"), output_path: "/scratch/alamo-runs/results/output.three", scheduler_system: "slurm", scheduler_job_id: "103", scheduler_details: { partition: "gpu", job_name: "simulation-three" } };
+    const projectRun = { ...run("simulation", "Simulation one"), copy_count: 2, artifact_count: 1, output_path: "/scratch/alamo-runs/results/output.one", scheduler_system: "slurm", scheduler_job_id: "101", scheduler_details: { partition: "gpu", job_name: "simulation-one" } };
+    const secondRun = { ...run("simulation-two", "Simulation two"), copy_count: 0, artifact_count: 3, output_path: "/scratch/alamo-runs/results/output.two", scheduler_system: "slurm", scheduler_job_id: "102", scheduler_details: { partition: "gpu", job_name: "simulation-two" } };
+    const thirdRun = { ...run("simulation-three", "Simulation three"), copy_count: 1, artifact_count: 0, output_path: "/scratch/alamo-runs/results/output.three", scheduler_system: "slurm", scheduler_job_id: "103", scheduler_details: { partition: "gpu", job_name: "simulation-three" } };
     const otherRun = { ...run("other-simulation", "Other simulation"), output_path: "/scratch/alamo-runs/results/output.other" };
     const projectRuns = [projectRun, secondRun, thirdRun, otherRun];
     const layout = {
@@ -455,6 +462,14 @@ describe("ProjectsPage", () => {
     expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
     expect(page.getByText("Cases")).toBeInTheDocument();
     expect(page.getByText("GPU")).toBeInTheDocument();
+
+    fireEvent.change(page.getByLabelText("Search project runs"), { target: { value: "" } });
+    await waitFor(() => expect(view.container.querySelectorAll(".project-run-row")).toHaveLength(3));
+    fireEvent.change(page.getByLabelText("Sort project runs"), { target: { value: "copies_desc" } });
+    expect(Array.from(view.container.querySelectorAll(".project-run-row strong")).map((node) => node.textContent)).toEqual(["Simulation one", "Simulation three", "Simulation two"]);
+    fireEvent.change(page.getByLabelText("Filter project copies"), { target: { value: "false" } });
+    expect(view.container.querySelectorAll(".project-run-row")).toHaveLength(1);
+    expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
 
     fireEvent.change(page.getByLabelText("Select project"), { target: { value: "other-project" } });
     await waitFor(() => expect(window.location.pathname).toBe("/projects/other-study/runs/other-simulation"));

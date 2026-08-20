@@ -109,7 +109,9 @@ zph get output.481516
 By default, `zph put` walks upward from each file and associates it with the
 nearest `metadata` file. This supports artifacts in subfolders while preserving
 their run-relative paths. Files from several output directories can be supplied
-in one command and are grouped by run automatically. Use
+in one command and are grouped by run automatically. A quoted basename pattern
+such as `zph put '*.png'` discovers metadata-rooted runs recursively beneath the
+current directory and applies the pattern inside each one. Use
 `--directory RUN_DIRECTORY` to explicitly associate every target with a single
 run instead.
 
@@ -122,6 +124,9 @@ and overwrite conflicting files, or cancel. For scripts, use `--output PATH`,
 `--rename`, or `--overwrite` to make the collision policy explicit.
 Successful `zph get`, `zph put`, and `zph sync` operations refresh the local
 copy inventory and its last-update action.
+The registration and transfer commands `import`, `add`, `sync`, `put`, and
+`get` accept `--dry-run` to report their planned work without changing Zephyr,
+the sync cache, or local files.
 
 `ZEPHYR_SERVER` and `ZEPHYR_TOKEN` override the credential file for jobs and
 CI. Locally, the `HASH` in Alamo's `metadata` file is the complete run identity;

@@ -433,6 +433,10 @@ def cmd_login(args: argparse.Namespace) -> None:
 
 def cmd_import(args: argparse.Namespace) -> None:
     directory = Path(args.directory)
+    if getattr(args, "dry_run", False):
+        alamo_hash = require_alamo_hash(directory)
+        print(f"DRY RUN  would register HASH {alamo_hash} from {directory.resolve()}")
+        return
     client = configured_client()
     run = import_directory(client, directory, args.name, status=args.status)
     print(f"{run['alamo_hash']}  {run['name']}")
@@ -761,6 +765,7 @@ def print_add_record(
         "CURRENT": ("✓", ANSI_DIM),
         "SKIPPED": ("○", ANSI_YELLOW),
         "ERROR": ("×", ANSI_RED),
+        "DRY RUN": ("◇", ANSI_BLUE),
     }
     symbol, action_color = appearances[action]
     prefix = paint(f"{symbol} {action:<8}", ANSI_BOLD, action_color, enabled=color)
@@ -964,6 +969,29 @@ def cmd_add(args: argparse.Namespace) -> None:
                 detail=str(error),
             )
 
+    if getattr(args, "dry_run", False):
+        for _, location, alamo_hash, status in candidates:
+            print_add_record(
+                "DRY RUN",
+                alamo_hash,
+                status,
+                location,
+                color=color,
+                detail="would add or update this run",
+            )
+        print()
+        print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+        print(
+            f"  {paint('Dry run', ANSI_BOLD, enabled=color)}  "
+            f"{len(candidates)} runs would be checked; no records were changed"
+        )
+        print()
+        if failed:
+            raise WorkspaceError(
+                f"{failed} run{'s' if failed != 1 else ''} could not be inspected"
+            )
+        return
+
     client = configured_client()
     print(
         f"  Check  {paint(str(len(candidates)), ANSI_BOLD, enabled=color)} fingerprints",
@@ -1129,6 +1157,55 @@ def cmd_sync(args: argparse.Namespace) -> None:
             "  Mode   Shallow inventory: BoxLib data trees are counted but not entered.",
             flush=True,
         )
+    if getattr(args, "dry_run", False):
+        prepared = 0
+        for index, (directory, alamo_hash) in enumerate(candidates, start=1):
+            location = display_run_path(directory, display_root)
+            print(
+                f"  Scan   [{index:>{len(str(len(candidates)))}}/{len(candidates)}] "
+                f"{paint(location, ANSI_BOLD, enabled=color)}",
+                flush=True,
+            )
+            try:
+                inventory = directory_inventory(directory, deep=deep)
+                file_label = "files" if inventory.file_count_complete else "indexed files"
+                details = [f"{inventory.file_count:,} {file_label}"]
+                if inventory.data_tree_count:
+                    details.append(f"{inventory.data_tree_count:,} BoxLib trees")
+                if inventory.total_size_bytes is not None:
+                    details.append(format_file_size(inventory.total_size_bytes))
+                details.extend([copy_data_label(inventory), "would update location"])
+                print_add_record(
+                    "DRY RUN",
+                    alamo_hash,
+                    "stored",
+                    location,
+                    color=color,
+                    detail=", ".join(details),
+                )
+                prepared += 1
+            except (WorkspaceError, OSError) as error:
+                failed += 1
+                print_add_record(
+                    "ERROR",
+                    alamo_hash,
+                    "failed",
+                    location,
+                    color=color,
+                    detail=str(error),
+                )
+        print(f"  {paint(rule, ANSI_DIM, enabled=color)}")
+        print(
+            f"  {paint('Dry run', ANSI_BOLD, enabled=color)}  "
+            f"{paint(str(prepared), ANSI_CYAN, ANSI_BOLD, enabled=color)} "
+            "locations would be updated; no server or cache changes were made"
+        )
+        print()
+        if failed:
+            raise WorkspaceError(
+                f"{failed} cop{'y' if failed == 1 else 'ies'} could not be inspected"
+            )
+        return
     client = configured_client()
     runs = fetch_sync_states(client, hashes)
     for alamo_hash in hashes:
@@ -1448,14 +1525,56 @@ def cmd_run(args: argparse.Namespace) -> None:
         raise SystemExit(process.returncode)
 
 
-def expanded_paths(patterns: list[str]) -> list[Path]:
+def matching_artifacts(directory: Path, pattern: str) -> list[Path]:
+    """Find a selector beneath one run without entering generated data trees."""
+    matches: list[Path] = []
+    for current, names, filenames in os.walk(directory, followlinks=False):
+        current_path = Path(current)
+        if current_path != directory and "metadata" in filenames:
+            names[:] = []
+            continue
+        names[:] = [
+            name
+            for name in names
+            if name not in ALWAYS_PRUNED_DIRECTORIES
+            and not BOX_LIB_DATA_TREE.fullmatch(name)
+        ]
+        for filename in filenames:
+            path = current_path / filename
+            relative = path.relative_to(directory)
+            if relative.match(pattern):
+                matches.append(path.resolve())
+    return matches
+
+
+def expanded_put_paths(patterns: list[str], override: Path | None = None) -> list[Path]:
+    """Expand direct paths and apply unmatched/basename globs to every discovered run."""
     paths: list[Path] = []
+    selectors: list[str] = []
     for pattern in patterns:
-        matches = sorted(glob.glob(pattern, recursive=True))
-        if not matches and Path(pattern).exists():
-            matches = [pattern]
-        paths.extend(Path(match) for match in matches if Path(match).is_file())
-    return list(dict.fromkeys(path.resolve() for path in paths))
+        expanded = str(Path(pattern).expanduser())
+        is_basename_selector = glob.has_magic(expanded) and Path(expanded).parent == Path(".")
+        if is_basename_selector:
+            selectors.append(expanded)
+            continue
+        matches = sorted(glob.glob(expanded, recursive=True))
+        if not matches and Path(expanded).exists():
+            matches = [expanded]
+        files = [Path(match).resolve() for match in matches if Path(match).is_file()]
+        if files:
+            paths.extend(files)
+        elif glob.has_magic(expanded) and not Path(expanded).is_absolute():
+            selectors.append(expanded)
+
+    if selectors:
+        if override is not None:
+            run_directories = [override]
+        else:
+            _, run_directories = discover_run_directories(Path("."))
+        for directory in run_directories:
+            for selector in selectors:
+                paths.extend(matching_artifacts(directory, selector))
+    return list(dict.fromkeys(paths))
 
 
 def artifact_kind(path: Path) -> str:
@@ -1491,11 +1610,11 @@ def artifact_run_directory(path: Path) -> Path:
 
 
 def cmd_put(args: argparse.Namespace) -> None:
-    paths = expanded_paths(args.paths)
+    override = Path(args.directory).resolve() if args.directory else None
+    paths = expanded_put_paths(args.paths, override)
     if not paths:
         raise WorkspaceError("No files matched")
 
-    override = Path(args.directory).resolve() if args.directory else None
     grouped: dict[Path, list[Path]] = {}
     for path in paths:
         directory = override or artifact_run_directory(path)
@@ -1503,8 +1622,28 @@ def cmd_put(args: argparse.Namespace) -> None:
 
     # Validate every local association before creating or uploading any records.
     hashes = {directory: require_alamo_hash(directory) for directory in grouped}
-    client = configured_client()
     color = color_enabled()
+    if getattr(args, "dry_run", False):
+        total = 0
+        for directory, run_paths in grouped.items():
+            print(
+                f"{paint('DRY RUN', ANSI_BOLD, ANSI_BLUE, enabled=color)}  "
+                f"HASH {paint(hashes[directory], ANSI_BOLD, enabled=color)}  "
+                f"{paint(str(directory), ANSI_DIM, enabled=color)}"
+            )
+            for path in run_paths:
+                try:
+                    logical_path = path.relative_to(directory).as_posix()
+                except ValueError:
+                    logical_path = path.name
+                print(f"  would upload  {logical_path}  ({format_file_size(path.stat().st_size)})")
+                total += 1
+        print(
+            f"Dry run: {total} file{'s' if total != 1 else ''} across "
+            f"{len(grouped)} run{'s' if len(grouped) != 1 else ''}; nothing uploaded"
+        )
+        return
+    client = configured_client()
     for directory, run_paths in grouped.items():
         alamo_hash = hashes[directory]
         run = lookup_run_by_hash(client, alamo_hash)
@@ -1799,6 +1938,31 @@ def cmd_get(args: argparse.Namespace) -> None:
     run = find_run(client, args.reference)
     run_id = str(run["id"])
     requested_root = Path(args.output or preferred_run_directory(run))
+    if getattr(args, "dry_run", False):
+        run_data = client.request("GET", f"/runs/{run_id}")
+        records = client.request("GET", f"/runs/{run_id}/artifacts")
+        latest: dict[str, dict[str, Any]] = {}
+        for record in records:
+            latest.setdefault(record["path"], record)
+        planned = ["zephyr-run.json"]
+        if run_data.get("metadata"):
+            planned.append("metadata")
+        if run_data.get("thermo"):
+            planned.append("thermo.dat")
+        planned.extend(
+            relative
+            for relative in latest
+            if relative not in {"metadata", "thermo.dat", ".zephyr.json", "zephyr-run.json"}
+        )
+        print(
+            f"DRY RUN  would restore {run.get('name') or preferred_run_directory(run)} "
+            f"(HASH {run.get('alamo_hash') or '-'}, UID {run_id}) into "
+            f"{requested_root.expanduser().resolve()}"
+        )
+        for relative in planned:
+            print(f"  would write  {relative}")
+        print(f"Dry run: {len(planned)} files; nothing downloaded or written")
+        return
     root, overwrite = prepare_restore_directory(
         requested_root,
         overwrite=args.overwrite,
@@ -1920,6 +2084,11 @@ def parser() -> argparse.ArgumentParser:
     import_command.add_argument("directory", nargs="?", default=".")
     import_command.add_argument("--name")
     import_command.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be registered without changing Zephyr",
+    )
+    import_command.add_argument(
         "--status",
         choices=["starting", "running", "completed", "failed", "interrupted"],
         default="completed",
@@ -1939,6 +2108,11 @@ def parser() -> argparse.ArgumentParser:
         nargs="*",
         help="directories, metadata files, or wildcard patterns (default: current directory)",
     )
+    add.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show discovered runs without changing Zephyr",
+    )
     add.set_defaults(handler=cmd_add)
 
     sync = commands.add_parser(
@@ -1955,6 +2129,11 @@ def parser() -> argparse.ArgumentParser:
         metavar="PATH",
         nargs="*",
         help="directories, metadata files, or wildcard patterns (default: current directory)",
+    )
+    sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="scan and report without updating locations or cache",
     )
     sync.add_argument(
         "--deep",
@@ -1989,6 +2168,11 @@ def parser() -> argparse.ArgumentParser:
         "--directory",
         help="use this run directory for every file instead of searching its ancestors",
     )
+    put.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show matched artifacts without uploading them",
+    )
     put.set_defaults(handler=cmd_put)
 
     get = commands.add_parser(
@@ -2002,6 +2186,11 @@ def parser() -> argparse.ArgumentParser:
         "--rename",
         action="store_true",
         help="use the next available directory name if the destination exists",
+    )
+    get.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show files that would be restored without writing them",
     )
     collision.add_argument(
         "--overwrite",

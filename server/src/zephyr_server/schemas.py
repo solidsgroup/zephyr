@@ -133,6 +133,7 @@ class RunRead(BaseModel):
     tags: list[str]
     notes: str
     thumbnail_artifact_id: uuid.UUID | None
+    copy_count: int = 0
     artifact_count: int = 0
     artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
     created_at: datetime

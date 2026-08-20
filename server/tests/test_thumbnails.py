@@ -26,6 +26,12 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 headers=headers,
             )
             run_id = uuid.UUID(created.json()["id"])
+            empty = await client.post(
+                "/api/v1/runs",
+                json={"name": "No artifact test", "alamo_hash": f"empty-{uuid.uuid4()}"},
+                headers=headers,
+            )
+            empty_run_id = empty.json()["id"]
 
             async with SessionLocal() as db:
                 records: list[RunArtifact] = []
@@ -80,6 +86,7 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))
             assert listed["artifact_count"] == 4
+            assert listed["copy_count"] == 0
             assert len(listed["artifact_previews"]) == 3
             assert listed["artifact_previews"][0]["id"] == webm_id
             assert listed["artifact_previews"][0]["content_type"] == "video/webm"
@@ -87,6 +94,22 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 f"/api/v1/runs/{run_id}/artifacts/"
             )
             assert listed["artifact_previews"][0]["download_url"].endswith("/content")
+
+            with_artifacts = await client.get(
+                "/api/v1/runs", params={"has_artifacts": "true"}
+            )
+            assert str(run_id) in {run["id"] for run in with_artifacts.json()}
+            assert empty_run_id not in {run["id"] for run in with_artifacts.json()}
+            without_artifacts = await client.get(
+                "/api/v1/runs", params={"has_artifacts": "false"}
+            )
+            assert empty_run_id in {run["id"] for run in without_artifacts.json()}
+            assert str(run_id) not in {run["id"] for run in without_artifacts.json()}
+            artifact_order = await client.get(
+                "/api/v1/runs", params={"sort": "artifacts_desc", "limit": 1000}
+            )
+            artifact_ids = [run["id"] for run in artifact_order.json()]
+            assert artifact_ids.index(str(run_id)) < artifact_ids.index(empty_run_id)
 
             selected = await client.put(
                 f"/api/v1/runs/{run_id}/artifacts/{selected_id}/thumbnail",
@@ -115,3 +138,7 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
 
             deleted = await client.delete(f"/api/v1/runs/{run_id}", headers=headers)
             assert deleted.status_code == 204
+            deleted_empty = await client.delete(
+                f"/api/v1/runs/{empty_run_id}", headers=headers
+            )
+            assert deleted_empty.status_code == 204

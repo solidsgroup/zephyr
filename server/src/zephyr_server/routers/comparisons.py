@@ -11,7 +11,12 @@ from sqlalchemy.orm import selectinload
 from ..db import get_db
 from ..dependencies import current_user
 from ..models import RunMetadata, ThermoSeries, User
-from .runs import get_accessible_run, run_read
+from .runs import (
+    artifact_previews_for_runs,
+    copy_counts_for_runs,
+    get_accessible_run,
+    run_read,
+)
 
 router = APIRouter(prefix="/comparisons", tags=["results explorer"])
 
@@ -23,8 +28,10 @@ async def compare_runs(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = []
-    for run_id in ids:
-        run = await get_accessible_run(db, user, run_id)
+    runs = [await get_accessible_run(db, user, run_id) for run_id in ids]
+    previews = await artifact_previews_for_runs(db, runs)
+    copy_counts = await copy_counts_for_runs(db, runs)
+    for run in runs:
         metadata = await db.get(RunMetadata, run.id)
         series = list(
             await db.scalars(
@@ -36,7 +43,11 @@ async def compare_runs(
         )
         result.append(
             {
-                "run": run_read(run),
+                "run": run_read(
+                    run,
+                    *previews.get(run.id, (0, [])),
+                    copy_count=copy_counts.get(run.id, 0),
+                ),
                 "metadata": metadata.values if metadata else {},
                 "thermo": [
                     {

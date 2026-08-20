@@ -82,7 +82,9 @@ available.
 Thus both `zph put output/myfile.png` and
 `zph put 'output/images/**/*.png'` select the run described by
 `output/metadata`; nested paths such as `images/frames/result.png` are retained
-in Zephyr. Files from multiple run directories can be uploaded in one command.
+in Zephyr. A quoted basename selector such as `zph put '*.png'` recursively
+discovers runs beneath the current directory, then applies that selector inside
+each run. Files from multiple run directories can be uploaded in one command.
 Pass `--directory RUN_DIRECTORY` to override this association.
 
 `zph get` accepts an output-directory name, HASH, or Zephyr UID and preserves
@@ -91,5 +93,8 @@ chooser. Existing local destinations open a second chooser with safe rename,
 alternate-path, merge/overwrite, and cancel options. Non-interactive jobs can
 select the behavior with `--output PATH`, `--rename`, or `--overwrite`.
 Successful gets and puts refresh the same copy inventory as `zph sync`.
+Use `--dry-run` with `zph import`, `add`, `sync`, `put`, or `get` to inspect the
+planned operation without changing server data, the local sync cache, or local
+files.
 
 See the repository's main README for the complete workflow.

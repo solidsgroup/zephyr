@@ -4,7 +4,7 @@ import hashlib
 import posixpath
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
@@ -79,6 +79,7 @@ def run_read(
     run: Run,
     artifact_count: int = 0,
     artifact_previews: list[ArtifactPreview] | None = None,
+    copy_count: int = 0,
     metadata_values: dict[str, str] | None = None,
 ) -> RunRead:
     data = {column.name: getattr(run, column.name) for column in Run.__table__.columns}
@@ -96,6 +97,7 @@ def run_read(
     if not data["output_path"]:
         data["output_path"] = alamo_output_path(metadata_details)
     data["effective_status"] = effective_status(run)
+    data["copy_count"] = copy_count
     data["artifact_count"] = artifact_count
     data["artifact_previews"] = artifact_previews or []
     return RunRead.model_validate(data)
@@ -198,6 +200,22 @@ async def artifact_previews_for_runs(
     return result
 
 
+async def copy_counts_for_runs(
+    db: AsyncSession,
+    runs: list[Run],
+) -> dict[uuid.UUID, int]:
+    if not runs:
+        return {}
+    rows = (
+        await db.execute(
+            select(RunCopy.run_id, func.count(RunCopy.id))
+            .where(RunCopy.run_id.in_([run.id for run in runs]))
+            .group_by(RunCopy.run_id)
+        )
+    ).all()
+    return {run_id: count for run_id, count in rows}
+
+
 def accessible_project_ids(user: User):
     return select(Project.id).where(
         or_(
@@ -234,14 +252,35 @@ async def list_runs(
     search: str | None = None,
     project_id: uuid.UUID | None = None,
     has_thumbnail: bool | None = None,
+    has_copies: bool | None = None,
+    has_artifacts: bool | None = None,
     site: str | None = None,
     uncategorized: bool = False,
+    sort_by: Literal[
+        "updated",
+        "copies_desc",
+        "copies_asc",
+        "artifacts_desc",
+        "artifacts_asc",
+    ] = Query(default="updated", alias="sort"),
     limit: int = Query(default=200, ge=1, le=1000),
     include_scheduler_metadata: bool = False,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Run).where(or_(Run.owner_id == user.id, Run.id.in_(accessible_run_ids(user))))
+    copy_count = (
+        select(func.count(RunCopy.id))
+        .where(RunCopy.run_id == Run.id)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    artifact_count = (
+        select(func.count(func.distinct(RunArtifact.path)))
+        .where(RunArtifact.run_id == Run.id)
+        .correlate(Run)
+        .scalar_subquery()
+    )
     if project_id is not None:
         query = query.where(
             Run.id.in_(
@@ -281,6 +320,10 @@ async def list_runs(
             if has_thumbnail
             else Run.thumbnail_artifact_id.is_(None)
         )
+    if has_copies is not None:
+        query = query.where(copy_count > 0 if has_copies else copy_count == 0)
+    if has_artifacts is not None:
+        query = query.where(artifact_count > 0 if has_artifacts else artifact_count == 0)
     if site:
         query = query.where(
             select(RunCopy.id)
@@ -290,8 +333,16 @@ async def list_runs(
         )
     if uncategorized:
         query = query.where(Run.id.not_in(select(RunProject.run_id)))
-    runs = list(await db.scalars(query.order_by(Run.updated_at.desc()).limit(limit)))
+    order = {
+        "updated": (Run.updated_at.desc(),),
+        "copies_desc": (copy_count.desc(), Run.updated_at.desc()),
+        "copies_asc": (copy_count.asc(), Run.updated_at.desc()),
+        "artifacts_desc": (artifact_count.desc(), Run.updated_at.desc()),
+        "artifacts_asc": (artifact_count.asc(), Run.updated_at.desc()),
+    }[sort_by]
+    runs = list(await db.scalars(query.order_by(*order).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)
+    copy_counts = await copy_counts_for_runs(db, runs)
     metadata_by_run: dict[uuid.UUID, dict[str, str]] = {}
     if include_scheduler_metadata:
         scheduler_run_ids = [
@@ -313,6 +364,7 @@ async def list_runs(
         run_read(
             run,
             *previews.get(run.id, (0, [])),
+            copy_count=copy_counts.get(run.id, 0),
             metadata_values=metadata_by_run.get(run.id),
         )
         for run in runs

@@ -27,7 +27,7 @@ from ..schemas import (
     ProjectRunPlacementWrite,
     ProjectUpdate,
 )
-from .runs import artifact_previews_for_runs, run_read
+from .runs import artifact_previews_for_runs, copy_counts_for_runs, run_read
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -201,11 +201,16 @@ async def project_layout(
     ).all()
     runs = [run for run, _ in rows]
     previews = await artifact_previews_for_runs(db, runs)
+    copy_counts = await copy_counts_for_runs(db, runs)
     return ProjectLayoutRead(
         folders=[ProjectFolderRead.model_validate(folder) for folder in folders],
         runs=[
             ProjectRunPlacementRead(
-                run=run_read(run, *previews.get(run.id, (0, []))),
+                run=run_read(
+                    run,
+                    *previews.get(run.id, (0, [])),
+                    copy_count=copy_counts.get(run.id, 0),
+                ),
                 folder_id=link.folder_id,
                 position=link.position,
             )
@@ -470,7 +475,15 @@ async def list_project_runs(
         )
     )
     previews = await artifact_previews_for_runs(db, runs)
-    return [run_read(run, *previews.get(run.id, (0, []))) for run in runs]
+    copy_counts = await copy_counts_for_runs(db, runs)
+    return [
+        run_read(
+            run,
+            *previews.get(run.id, (0, [])),
+            copy_count=copy_counts.get(run.id, 0),
+        )
+        for run in runs
+    ]
 
 
 @router.put(

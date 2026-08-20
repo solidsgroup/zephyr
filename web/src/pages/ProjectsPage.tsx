@@ -28,6 +28,16 @@ const ROOT = "__project_root__";
 const EMPTY_RUN_IDS = new Set<string>();
 const COLLAPSED_FOLDERS_KEY = "zephyr:collapsed-project-folders";
 
+type RunInventorySort = "position" | "copies_desc" | "copies_asc" | "artifacts_desc" | "artifacts_asc";
+
+function comparePlacements(left: ProjectRunPlacement, right: ProjectRunPlacement, sort: RunInventorySort) {
+  if (sort === "position") return left.position - right.position || left.run.name.localeCompare(right.run.name);
+  const field = sort.startsWith("copies") ? "copy_count" : "artifact_count";
+  const difference = left.run[field] - right.run[field];
+  const ordered = sort.endsWith("desc") ? -difference : difference;
+  return ordered || left.run.name.localeCompare(right.run.name);
+}
+
 function projectPath(project: Project, runId?: string | null) {
   const base = `/projects/${encodeURIComponent(project.slug)}`;
   return runId ? `${base}/runs/${encodeURIComponent(runId)}` : base;
@@ -120,6 +130,7 @@ function ProjectRunRow({
       <span className="project-run-copy">
         <span><StatusPill status={run.effective_status} /><strong>{run.name}</strong></span>
         <small>{run.output_path ? <PathTail value={run.output_path} /> : run.host ?? "No output path"}</small>
+        <small className="project-run-counts">{run.copy_count} {run.copy_count === 1 ? "copy" : "copies"} · {run.artifact_count} {run.artifact_count === 1 ? "artifact" : "artifacts"}</small>
       </span>
     </button>
   );
@@ -285,6 +296,9 @@ function ProjectWorkspace({
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [copies, setCopies] = useState("");
+  const [artifacts, setArtifacts] = useState("");
+  const [sort, setSort] = useState<RunInventorySort>("position");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => storedCollapsedFolders(project.id));
   const [draggedRunIds, setDraggedRunIds] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -363,7 +377,7 @@ function ProjectWorkspace({
       const key = parentKey(placement.folder_id);
       result.set(key, [...(result.get(key) ?? []), placement]);
     }
-    for (const values of result.values()) values.sort((a, b) => a.position - b.position || a.run.name.localeCompare(b.run.name));
+    for (const values of result.values()) values.sort((a, b) => comparePlacements(a, b, "position"));
     return result;
   }, [placements]);
   const searchView = useMemo(() => {
@@ -398,11 +412,22 @@ function ProjectWorkspace({
     return childFolders;
   }, [childFolders]);
   const shownRunsByFolder = useMemo(() => {
-    if (!searchView) return runsByFolder;
     const result = new Map<string, ProjectRunPlacement[]>();
-    for (const [key, values] of runsByFolder) result.set(key, values.filter((placement) => searchView.runIds.has(placement.run.id)));
+    for (const [key, values] of runsByFolder) {
+      const filtered = values.filter((placement) => {
+        if (searchView && !searchView.runIds.has(placement.run.id)) return false;
+        if (copies && (placement.run.copy_count > 0) !== (copies === "true")) return false;
+        if (artifacts && (placement.run.artifact_count > 0) !== (artifacts === "true")) return false;
+        return true;
+      });
+      result.set(key, filtered.sort((left, right) => comparePlacements(left, right, sort)));
+    }
     return result;
-  }, [runsByFolder, searchView]);
+  }, [artifacts, copies, runsByFolder, searchView, sort]);
+  const shownRunCount = useMemo(
+    () => [...shownRunsByFolder.values()].reduce((total, values) => total + values.length, 0),
+    [shownRunsByFolder],
+  );
   const effectiveCollapsed = searchQuery ? EMPTY_RUN_IDS : collapsed;
   const selectedPlacement = selectedRunId
     ? placements.find((placement) => placement.run.id === selectedRunId) ?? null
@@ -514,7 +539,7 @@ function ProjectWorkspace({
     <div className="project-workspace-shell">
       <aside className="project-data-sidebar">
         <div className="project-tree-actions">
-          <div><span>{searchView ? `${searchView.runIds.size} of ${placements.length} runs` : `${placements.length} runs`}</span><span>{folders.length} folders</span></div>
+          <div><span>{searchView || copies || artifacts ? `${shownRunCount} of ${placements.length} runs` : `${placements.length} runs`}</span><span>{folders.length} folders</span></div>
           {canEdit && <div><button title="Add a run" onClick={() => { setShowAddRun(!showAddRun); setShowNewFolder(false); }}>＋ Run</button><button title="New folder" onClick={() => beginFolder(null)}>＋ Folder</button></div>}
         </div>
         <label className="project-tree-search">
@@ -523,6 +548,11 @@ function ProjectWorkspace({
           {(search !== searchQuery || searchResults.isFetching) && <i className="spinner" aria-label="Searching project" />}
           {search && <button aria-label="Clear project search" onClick={() => { setSearch(""); setSearchQuery(""); }}>×</button>}
         </label>
+        <div className="project-tree-filters">
+          <select value={copies} onChange={(event) => setCopies(event.target.value)} aria-label="Filter project copies"><option value="">Any copies</option><option value="true">Has copies</option><option value="false">No copies</option></select>
+          <select value={artifacts} onChange={(event) => setArtifacts(event.target.value)} aria-label="Filter project artifacts"><option value="">Any artifacts</option><option value="true">Has artifacts</option><option value="false">No artifacts</option></select>
+          <select value={sort} onChange={(event) => setSort(event.target.value as RunInventorySort)} aria-label="Sort project runs"><option value="position">Project order</option><option value="copies_desc">Most copies</option><option value="copies_asc">Fewest copies</option><option value="artifacts_desc">Most artifacts</option><option value="artifacts_asc">Fewest artifacts</option></select>
+        </div>
         {showNewFolder && <div className="project-sidebar-form"><strong>New folder</strong><input autoFocus aria-label="Folder name" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="Folder name" onKeyDown={(event) => event.key === "Enter" && folderName.trim() && createFolder.mutate()} /><select aria-label="Parent folder" value={folderParent ?? ""} onChange={(event) => setFolderParent(event.target.value || null)}><option value="">Project root</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select><div><button onClick={() => setShowNewFolder(false)}>Cancel</button><button className="primary" disabled={!folderName.trim() || createFolder.isPending} onClick={() => createFolder.mutate()}>Create</button></div>{createFolder.isError && <small>Could not create folder.</small>}</div>}
         {showAddRun && <div className="project-sidebar-form"><strong>Add run</strong><select aria-label="Run to add" value={runId} onChange={(event) => setRunId(event.target.value)}><option value="">Choose an owned run…</option>{candidates.map((run) => <option key={run.id} value={run.id}>{run.name}</option>)}</select><select aria-label="Destination folder" value={runFolder ?? ""} onChange={(event) => setRunFolder(event.target.value || null)}><option value="">Project root</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select><div><button onClick={() => setShowAddRun(false)}>Cancel</button><button className="primary" disabled={!runId || addRun.isPending} onClick={() => addRun.mutate()}>Add</button></div></div>}
         <div className="project-tree-scroll">
@@ -538,6 +568,7 @@ function ProjectWorkspace({
           {(shownRunsByFolder.get(ROOT) ?? []).map((placement) => <ProjectRunRow key={placement.run.id} placement={placement} active={!showSettings && selectedPlacement?.run.id === placement.run.id} selected={selectedRunIds.has(placement.run.id)} rangePreview={rangePreviewRunIds.has(placement.run.id)} canEdit={canEdit} dragging={draggedRunIdSet.has(placement.run.id)} onSelect={(event) => selectRun(event, placement.run.id)} onHover={(hovered) => hoverRun(placement.run.id, hovered)} onDragStart={(event) => startRunDrag(event, placement.run.id)} onDragEnd={() => { setDraggedRunIds([]); setDropTarget(null); }} />)}
           {!layout.isPending && !searchQuery && !folders.length && !placements.length && <div className="project-tree-empty"><strong>No simulation data yet</strong><span>Add runs, then group them into folders.</span></div>}
           {!layout.isPending && searchQuery && !searchResults.isFetching && searchView?.runIds.size === 0 && searchView?.folderIds.size === 0 && <div className="project-tree-empty"><strong>No matching runs</strong><span>Search covers metadata, paths, and artifact filenames.</span></div>}
+          {!layout.isPending && !searchQuery && (copies || artifacts) && shownRunCount === 0 && <div className="project-tree-empty"><strong>No matching runs</strong><span>Try a different copy or artifact filter.</span></div>}
           {searchResults.isError && <div className="project-tree-state error-text">Could not search this project.</div>}
         </div>
         <div className="project-sidebar-footer">
