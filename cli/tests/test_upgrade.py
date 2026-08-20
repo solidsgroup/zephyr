@@ -91,5 +91,5 @@ def test_cluster_distribution_contains_an_installable_package(tmp_path: Path) ->
 
     with tarfile.open(distribution, "r:gz") as archive:
         names = set(archive.getnames())
-    assert "zph-0.5.5/setup.py" in names
-    assert "zph-0.5.5/src/zephyr_cli/main.py" in names
+    assert "zph-0.5.6/setup.py" in names
+    assert "zph-0.5.6/src/zephyr_cli/main.py" in names
