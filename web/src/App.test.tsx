@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import StatusPill from "./components/StatusPill";
 import RunBrowser, { ArtifactStack } from "./components/RunBrowser";
+import MetadataTable from "./components/MetadataTable";
+import { compactPathValues } from "./comparisonPaths";
 import PathTail from "./components/PathTail";
 import JobsPage from "./pages/JobsPage";
 import ProjectsPage from "./pages/ProjectsPage";
@@ -55,6 +57,37 @@ describe("StatusPill", () => {
   it("shows the effective run state", () => {
     render(<StatusPill status="unreachable" />);
     expect(screen.getByLabelText("unreachable")).toBeInTheDocument();
+  });
+});
+
+describe("MetadataTable", () => {
+  it("contracts common path segments and preserves full values on hover", () => {
+    const first = "/scratch/projects/alamo/case-one/results/output.101";
+    const second = "/scratch/projects/alamo/case-two/results/output.101";
+    expect(compactPathValues("Execution · Output path", [first, second])).toEqual([
+      "…/case-one/…",
+      "…/case-two/…",
+    ]);
+    expect(compactPathValues("Input", ["cases/one/input.in", "cases/two/input.in"])).toEqual([
+      "…/one/…",
+      "…/two/…",
+    ]);
+
+    render(<MetadataTable records={[
+      { name: "First", values: { "Execution · Output path": first } },
+      { name: "Second", values: { "Execution · Output path": second } },
+    ]} />);
+
+    expect(screen.getByText("…/case-one/…")).toBeInTheDocument();
+    expect(screen.getByText("…/case-two/…")).toBeInTheDocument();
+    expect(screen.getByTitle(first)).toHaveTextContent("…/case-one/…");
+    expect(screen.getByTitle(second)).toHaveTextContent("…/case-two/…");
+  });
+
+  it("wraps non-path values without changing their content", () => {
+    const value = "a very long value that should wrap rather than widen the comparison column";
+    render(<MetadataTable records={[{ name: "Run", values: { Notes: value } }]} />);
+    expect(screen.getByTitle(value).querySelector(".comparison-cell-value")).toHaveTextContent(value);
   });
 });
 

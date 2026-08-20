@@ -367,7 +367,13 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .icon-button { border: 0; background: transparent; color: #667085; font-size: 18px; padding: 4px; }
 .icon-button:hover { color: var(--blue); }
 .icon-button.danger:hover { color: #b42318; }
+.metadata-table { table-layout: fixed; }
+.metadata-table .comparison-field-column { width: 180px; }
+.metadata-table .comparison-value-column { width: 240px; }
+.metadata-table td { vertical-align: top; }
 .metadata-table td:first-child { font-family: "DM Mono", monospace; font-size: 10px; color: #344054; }
+.comparison-cell-value { display: block; max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+.comparison-path-value { color: #344054; font-family: "DM Mono", monospace; font-size: 10px; }
 .metadata-table tr.changed td { background: #fffaeb; }
 .metadata-table .comparison-table-empty { height: 86px; color: #98a2b3; font-family: inherit; text-align: center; }
 .comparison-similarity-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #d0d5dd; border-radius: 8px; padding: 8px 11px; background: white; color: #475467; font-size: 11px; font-weight: 650; cursor: pointer; }
