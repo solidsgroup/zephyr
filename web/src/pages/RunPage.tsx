@@ -10,7 +10,7 @@ import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
 import ThermoPlot from "../components/ThermoPlot";
 import { alamoOutputDirectory, formatSlurmMemory, slurmGpuCount, slurmJobId } from "../slurm";
-import type { Artifact, Run, RunCopy, RunDetail } from "../types";
+import type { Artifact, MetadataRecord, Run, RunCopy, RunDetail } from "../types";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -177,6 +177,39 @@ function commitReference(value: string) {
   return clean.match(/-g([0-9a-f]+)$/i)?.[1] ?? clean;
 }
 
+function metadataLabel(value: string) {
+  const normalized = value.replaceAll("_", " ");
+  return `${normalized.charAt(0).toLocaleUpperCase()}${normalized.slice(1)}`;
+}
+
+export function MetadataDetailSection({
+  metadata,
+  section,
+  title,
+}: {
+  metadata: MetadataRecord | null;
+  section: string;
+  title: string;
+}) {
+  const keys = Object.entries(metadata?.sections ?? {}).find(
+    ([name]) => name.toLocaleLowerCase() === section.toLocaleLowerCase(),
+  )?.[1] ?? [];
+  return (
+    <section className="panel metadata-detail-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">ALAMO METADATA</p><h2>{title}</h2></div>
+        <span>{keys.length} {keys.length === 1 ? "field" : "fields"}</span>
+      </div>
+      {keys.length ? <table className="metadata-detail-table"><tbody>{keys.map((key) => (
+        <tr key={key}>
+          <th>{metadataLabel(key)}</th>
+          <td><code title={metadata?.values[key] ?? ""}>{metadata?.values[key] || "—"}</code></td>
+        </tr>
+      ))}</tbody></table> : <div className="metadata-detail-empty">{metadata ? `No ${title.toLocaleLowerCase()} were found in this metadata file.` : "No metadata file has been posted."}</div>}
+    </section>
+  );
+}
+
 export function SlurmDetails({ run }: { run: Run }) {
   if (run.scheduler_system !== "slurm" && !run.scheduler_job_id?.startsWith("SLURM_JOB_ID=")) return null;
   const details = run.scheduler_details;
@@ -284,6 +317,10 @@ export function RunRecord({ runId, embedded = false }: { runId: string; embedded
           <div><small>Last heartbeat</small><strong>{run.last_heartbeat ? new Date(run.last_heartbeat).toLocaleString() : "—"}</strong></div>
           <div><small>Code revision</small><strong>{commit ? <a className="commit-link" href={`${repository}/commit/${encodeURIComponent(commit)}`} target="_blank" rel="noreferrer"><code>{run.git_commit!.slice(0, 12)}</code><span>↗</span></a> : "—"}</strong></div>
         </section>
+        <div className="metadata-overview-grid">
+          <MetadataDetailSection metadata={metadata} section="Compilation Details" title="Compilation details" />
+          <MetadataDetailSection metadata={metadata} section="Run Details" title="Run details" />
+        </div>
         <SlurmDetails run={run} />
         <CopyLocations copies={copies} />
         <section className="panel"><div className="panel-heading"><div><p className="eyebrow">LIVE SERIES</p><h2>Thermodynamics</h2></div></div><ThermoPlot runs={[{ name: run.name, thermo }]} /></section>

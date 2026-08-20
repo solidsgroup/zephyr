@@ -10,8 +10,8 @@ import PathTail from "./components/PathTail";
 import JobsPage from "./pages/JobsPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import SettingsPage from "./pages/SettingsPage";
-import { ArtifactViewer, CopyLocations, SlurmDetails } from "./pages/RunPage";
-import type { Artifact, Run, RunCopy } from "./types";
+import { ArtifactViewer, CopyLocations, MetadataDetailSection, SlurmDetails } from "./pages/RunPage";
+import type { Artifact, MetadataRecord, Run, RunCopy } from "./types";
 
 afterEach(() => {
   cleanup();
@@ -187,6 +187,28 @@ describe("PathTail", () => {
     expect(rendered.startsWith("…")).toBe(true);
     expect(rendered.endsWith(".481516")).toBe(true);
     expect(rendered).not.toContain("/scratch");
+  });
+});
+
+describe("MetadataDetailSection", () => {
+  it("shows one named metadata group as a dedicated details panel", () => {
+    const metadata = {
+      raw_text: "# COMPILATION DETAILS\nCompiler = GNU 14.2\nDimension = 3\n",
+      values: { Compiler: "GNU 14.2", Dimension: "3", Status: "Complete" },
+      sections: {
+        "Compilation Details": ["Compiler", "Dimension"],
+        "Run Details": ["Status"],
+      },
+      digest: "a".repeat(64),
+    } satisfies MetadataRecord;
+
+    render(<MetadataDetailSection metadata={metadata} section="Compilation Details" title="Compilation details" />);
+
+    expect(screen.getByRole("heading", { name: "Compilation details" })).toBeInTheDocument();
+    expect(screen.getByText("2 fields")).toBeInTheDocument();
+    expect(screen.getByText("Compiler").closest("tr")).toHaveTextContent("GNU 14.2");
+    expect(screen.getByText("Dimension").closest("tr")).toHaveTextContent("3");
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument();
   });
 });
 

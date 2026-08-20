@@ -289,6 +289,16 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
 .metric-grid > div:last-child { border: 0; }
 .metric-grid small { color: #7b8799; font-size: 10px; margin-bottom: 7px; }
 .metric-grid strong { color: #101828; font-size: 14px; }
+.metadata-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-bottom: 22px; }
+.metadata-overview-grid > .panel { min-width: 0; margin: 0; overflow: hidden; }
+.metadata-detail-panel .panel-heading { border-bottom: 1px solid #e4e7ec; }
+.metadata-detail-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.metadata-detail-table tr { border-bottom: 1px solid #edf0f4; }
+.metadata-detail-table tr:last-child { border-bottom: 0; }
+.metadata-detail-table th { width: 42%; padding: 9px 8px 9px 20px; color: #667085; font-size: 9px; font-weight: 650; text-align: left; vertical-align: top; }
+.metadata-detail-table td { padding: 9px 20px 9px 8px; color: #18202d; font-size: 10px; vertical-align: top; }
+.metadata-detail-table code { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
+.metadata-detail-empty { min-height: 82px; display: flex; align-items: center; justify-content: center; padding: 18px; color: #98a2b3; font-size: 10px; text-align: center; }
 .slurm-detail-panel { overflow: hidden; }
 .slurm-detail-panel .panel-heading { border-bottom: 1px solid #e4e7ec; padding-top: 12px; padding-bottom: 9px; }
 .slurm-detail-table { width: 100%; border-collapse: collapse; }
@@ -588,6 +598,7 @@ input:focus, textarea:focus, select:focus { border-color: #84adff; box-shadow: 0
   .toolbar { flex-wrap: wrap; }
   .search { width: 100%; }
   .metric-grid { grid-template-columns: 1fr 1fr; gap: 18px; }
+  .metadata-overview-grid { grid-template-columns: 1fr; }
   .metric-grid > div { border: 0; padding: 0; }
   .create-project { grid-template-columns: 1fr; }
   .public-shell { padding: 24px 16px 60px; }
