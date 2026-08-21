@@ -51,6 +51,7 @@ function run(id: string, name: string): Run {
     artifact_count: 0,
     artifact_previews: [],
     projects: [],
+    project_count: 0,
     created_at: "2026-08-03T20:00:00Z",
     updated_at: "2026-08-03T20:00:00Z",
   };
@@ -351,6 +352,7 @@ describe("RunBrowser", () => {
         : [{
           ...run("one", "Run one"),
           projects: [{ id: "project", slug: "study", name: "Parameter study" }],
+          project_count: 1,
         }],
     ), {
       status: 200,

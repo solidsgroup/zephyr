@@ -41,6 +41,7 @@ export interface Run {
   artifact_count: number;
   artifact_previews: ArtifactPreview[];
   projects: RunProjectBadge[];
+  project_count: number;
   created_at: string;
   updated_at: string;
 }

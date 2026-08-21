@@ -143,6 +143,7 @@ class RunRead(BaseModel):
     artifact_count: int = 0
     artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
     projects: list[RunProjectBadge] = Field(default_factory=list)
+    project_count: int = 0
     created_at: datetime
     updated_at: datetime
 

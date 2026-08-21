@@ -87,6 +87,7 @@ def run_read(
     copy_count: int = 0,
     metadata_values: dict[str, str] | None = None,
     projects: list[RunProjectBadge] | None = None,
+    project_count: int = 0,
 ) -> RunRead:
     data = {column.name: getattr(run, column.name) for column in Run.__table__.columns}
     metadata_job_id, metadata_details = slurm_context_from_metadata(metadata_values or {})
@@ -107,6 +108,7 @@ def run_read(
     data["artifact_count"] = artifact_count
     data["artifact_previews"] = artifact_previews or []
     data["projects"] = projects or []
+    data["project_count"] = project_count
     return RunRead.model_validate(data)
 
 
@@ -227,18 +229,30 @@ async def projects_for_runs(
     db: AsyncSession,
     runs: list[Run],
     user: User,
-) -> dict[uuid.UUID, list[RunProjectBadge]]:
+) -> tuple[dict[uuid.UUID, list[RunProjectBadge]], dict[uuid.UUID, int]]:
     if not runs:
-        return {}
+        return {}, {}
+    run_ids = [run.id for run in runs]
+    owned_run_ids = [run.id for run in runs if run.owner_id == user.id]
     rows = (
         await db.execute(
             select(RunProject.run_id, Project)
             .join(Project, Project.id == RunProject.project_id)
             .where(
-                RunProject.run_id.in_([run.id for run in runs]),
-                RunProject.project_id.in_(accessible_project_ids(user)),
+                RunProject.run_id.in_(run_ids),
+                or_(
+                    RunProject.run_id.in_(owned_run_ids),
+                    RunProject.project_id.in_(accessible_project_ids(user)),
+                ),
             )
             .order_by(Project.name)
+        )
+    ).all()
+    count_rows = (
+        await db.execute(
+            select(RunProject.run_id, func.count(RunProject.project_id))
+            .where(RunProject.run_id.in_(run_ids))
+            .group_by(RunProject.run_id)
         )
     ).all()
     result: dict[uuid.UUID, list[RunProjectBadge]] = {}
@@ -246,7 +260,7 @@ async def projects_for_runs(
         result.setdefault(run_id, []).append(
             RunProjectBadge(id=project.id, slug=project.slug, name=project.name)
         )
-    return result
+    return result, dict(count_rows)
 
 
 def accessible_project_ids(user: User):
@@ -382,7 +396,7 @@ async def list_runs(
     runs = list(await db.scalars(query.order_by(*order).limit(limit)))
     previews = await artifact_previews_for_runs(db, runs)
     copy_counts = await copy_counts_for_runs(db, runs)
-    projects_by_run = await projects_for_runs(db, runs, user)
+    projects_by_run, project_counts = await projects_for_runs(db, runs, user)
     metadata_by_run: dict[uuid.UUID, dict[str, str]] = {}
     if include_scheduler_metadata:
         scheduler_run_ids = [
@@ -407,6 +421,7 @@ async def list_runs(
             copy_count=copy_counts.get(run.id, 0),
             metadata_values=metadata_by_run.get(run.id),
             projects=projects_by_run.get(run.id),
+            project_count=project_counts.get(run.id, 0),
         )
         for run in runs
     ]

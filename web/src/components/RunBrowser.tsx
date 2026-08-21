@@ -148,7 +148,7 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     refetchInterval: 60_000,
   });
   const data = useMemo(
-    () => (runs.data ?? []).filter((run) => !uncategorized || !(run.projects?.length ?? 0)),
+    () => (runs.data ?? []).filter((run) => !uncategorized || !(run.project_count ?? run.projects?.length ?? 0)),
     [runs.data, uncategorized],
   );
   const sites = facets.data?.sites ?? [];
@@ -336,6 +336,9 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
           data.map((run) => {
             const active = location === `/runs/${run.id}`;
             const chosen = Boolean(selected[run.id]);
+            const projectCount = run.project_count ?? run.projects?.length ?? 0;
+            const shownProjects = (run.projects ?? []).slice(0, 2);
+            const hiddenProjectCount = Math.max(0, projectCount - shownProjects.length);
             return (
               <div
                 className="run-browser-item"
@@ -355,9 +358,10 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
                   <div className="run-artifact-slot"><ArtifactStack run={run} /></div>
                   <div className="run-browser-copy">
                     <div><strong title={run.name}>{run.name}</strong><StatusPill status={run.effective_status} /></div>
-                    {!!run.projects?.length && <div className="run-project-badges" aria-label={`Projects for ${run.name}`}>
-                      {run.projects.slice(0, 2).map((project) => <span title={`Project: ${project.name}`} key={project.id}>{project.name}</span>)}
-                      {run.projects.length > 2 && <span title={run.projects.slice(2).map((project) => project.name).join(", ")}>+{run.projects.length - 2}</span>}
+                    {!!projectCount && <div className="run-project-badges" aria-label={`Projects for ${run.name}`}>
+                      {shownProjects.map((project) => <span title={`Project: ${project.name}`} key={project.id}>{project.name}</span>)}
+                      {!!shownProjects.length && !!hiddenProjectCount && <span title={(run.projects ?? []).slice(2).map((project) => project.name).join(", ")}>+{hiddenProjectCount}</span>}
+                      {!shownProjects.length && <span>In {projectCount === 1 ? "a project" : `${projectCount} projects`}</span>}
                     </div>}
                     <small>{run.host ?? "Unknown host"}<span>·</span>{age(run.last_heartbeat)}<span>·</span>{run.copy_count} {run.copy_count === 1 ? "copy" : "copies"}<span>·</span>{run.artifact_count} {run.artifact_count === 1 ? "artifact" : "artifacts"}</small>
                     {run.progress != null && <span className="run-browser-progress"><i style={{ width: `${run.progress}%` }} /></span>}
