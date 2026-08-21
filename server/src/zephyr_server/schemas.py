@@ -310,6 +310,14 @@ class ProjectRead(BaseModel):
     visibility: str
 
 
+class ProjectDashboardRead(ProjectRead):
+    created_at: datetime
+    updated_at: datetime
+    last_modified_at: datetime
+    run_count: int
+    active_run_count: int
+
+
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None

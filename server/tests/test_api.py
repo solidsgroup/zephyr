@@ -321,6 +321,14 @@ async def test_run_lifecycle_and_public_project() -> None:
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
             project_run = next(item for item in project_runs.json() if item["id"] == run_id)
             assert project_run["copy_count"] == 2
+            dashboard = await client.get("/api/v1/projects/dashboard")
+            assert dashboard.status_code == 200
+            dashboard_project = next(
+                item for item in dashboard.json() if item["id"] == project_id
+            )
+            assert dashboard_project["run_count"] == 2
+            assert dashboard_project["active_run_count"] == 2
+            assert dashboard_project["last_modified_at"]
             comparison = await client.get(
                 "/api/v1/comparisons/runs",
                 params=[("ids", run_id), ("ids", batch_run_id)],

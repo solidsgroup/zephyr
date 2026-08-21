@@ -3,7 +3,8 @@ import { Link, useLocation } from "wouter";
 import type { User } from "../types";
 import RunBrowser from "./RunBrowser";
 
-function RailIcon({ name }: { name: "runs" | "jobs" | "compare" | "projects" | "settings" }) {
+function RailIcon({ name }: { name: "home" | "runs" | "jobs" | "compare" | "projects" | "settings" }) {
+  if (name === "home") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.5 12 5l7.5 6.5v7h-5v-5h-5v5h-5z" /></svg>;
   if (name === "runs") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M5 12h14M5 17.5h14" /><circle cx="8" cy="6.5" r="1" /><circle cx="16" cy="12" r="1" /><circle cx="10" cy="17.5" r="1" /></svg>;
   if (name === "jobs") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v13h-15zM7.5 9l2 2-2 2M12 14h4.5" /></svg>;
   if (name === "compare") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14M5 8l3-3 3 3M13 16l3 3 3-3" /></svg>;
@@ -14,7 +15,7 @@ function RailIcon({ name }: { name: "runs" | "jobs" | "compare" | "projects" | "
 export default function Layout({ user, children }: { user: User; children: ReactNode }) {
   const [location] = useLocation();
   const [runBrowserOpen, setRunBrowserOpen] = useState(false);
-  const runWorkspace = location === "/" || location.startsWith("/runs/");
+  const runWorkspace = location === "/runs" || location.startsWith("/runs/");
   const projectWorkspace = location === "/projects" || location.startsWith("/projects/");
   const active = (path: string, exact = false) =>
     exact ? location === path : location === path || location.startsWith(`${path}/`);
@@ -25,7 +26,8 @@ export default function Layout({ user, children }: { user: User; children: React
           <span className="brand-mark">Z</span>
         </Link>
         <nav aria-label="Primary navigation">
-          <Link href="/" aria-label="Runs" data-label="Runs" className={active("/", true) || active("/runs") ? "active" : ""} onClick={(event) => {
+          <Link href="/" aria-label="Dashboard" data-label="Dashboard" className={active("/", true) ? "active" : ""}><RailIcon name="home" /></Link>
+          <Link href="/runs" aria-label="Runs" data-label="Runs" className={active("/runs") ? "active" : ""} onClick={(event) => {
             if (runWorkspace) {
               event.preventDefault();
               setRunBrowserOpen(true);

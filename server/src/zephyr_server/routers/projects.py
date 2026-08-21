@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..dependencies import current_user
-from ..models import Project, ProjectFolder, ProjectMembership, Run, RunProject, User
+from ..models import Project, ProjectFolder, ProjectMembership, Run, RunProject, User, utcnow
 from ..schemas import (
     ProjectCreate,
+    ProjectDashboardRead,
     ProjectFolderCreate,
     ProjectFolderRead,
     ProjectFolderUpdate,
@@ -130,6 +132,71 @@ async def list_projects(
             Project.id.in_(member_projects),
         )
     return list(await db.scalars(select(Project).where(access).order_by(Project.name)))
+
+
+@router.get("/dashboard", response_model=list[ProjectDashboardRead])
+async def project_dashboard(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProjectDashboardRead]:
+    member_projects = select(ProjectMembership.project_id).where(
+        ProjectMembership.user_id == user.id
+    )
+    access = or_(
+        Project.owner_id == user.id,
+        Project.visibility.in_({"group", "public"}),
+        Project.id.in_(member_projects),
+    )
+    stale_before = utcnow() - timedelta(minutes=2)
+    active_run = Run.status.in_({"starting", "running"}) & or_(
+        Run.last_heartbeat.is_(None),
+        Run.last_heartbeat >= stale_before,
+    )
+    activity = (
+        select(
+            RunProject.project_id.label("project_id"),
+            func.count(Run.id).label("run_count"),
+            func.count(Run.id).filter(active_run).label("active_run_count"),
+            func.max(Run.updated_at).label("last_run_at"),
+        )
+        .join(Run, Run.id == RunProject.run_id)
+        .group_by(RunProject.project_id)
+        .subquery()
+    )
+    last_modified = case(
+        (activity.c.last_run_at.is_(None), Project.updated_at),
+        (Project.updated_at >= activity.c.last_run_at, Project.updated_at),
+        else_=activity.c.last_run_at,
+    )
+    rows = (
+        await db.execute(
+            select(
+                Project,
+                func.coalesce(activity.c.run_count, 0),
+                func.coalesce(activity.c.active_run_count, 0),
+                last_modified.label("last_modified_at"),
+            )
+            .outerjoin(activity, activity.c.project_id == Project.id)
+            .where(access)
+            .order_by(last_modified.desc(), Project.name)
+        )
+    ).all()
+    return [
+        ProjectDashboardRead(
+            id=project.id,
+            owner_id=project.owner_id,
+            slug=project.slug,
+            name=project.name,
+            description=project.description,
+            visibility=project.visibility,
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+            last_modified_at=last_modified_at,
+            run_count=run_count,
+            active_run_count=active_run_count,
+        )
+        for project, run_count, active_run_count, last_modified_at in rows
+    ]
 
 
 @router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)

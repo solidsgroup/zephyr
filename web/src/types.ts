@@ -133,6 +133,14 @@ export interface Project {
   visibility: "private" | "group" | "public";
 }
 
+export interface ProjectDashboard extends Project {
+  created_at: string;
+  updated_at: string;
+  last_modified_at: string;
+  run_count: number;
+  active_run_count: number;
+}
+
 export interface ProjectFolder {
   id: string;
   project_id: string;

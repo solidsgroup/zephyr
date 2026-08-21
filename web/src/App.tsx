@@ -6,6 +6,7 @@ import Layout from "./components/Layout";
 
 const ComparePage = lazy(() => import("./pages/ComparePage"));
 const ConnectPage = lazy(() => import("./pages/ConnectPage"));
+const HomePage = lazy(() => import("./pages/HomePage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
@@ -21,7 +22,8 @@ function PrivateApp() {
   return (
     <Layout user={user.data}>
       <Switch>
-        <Route path="/" component={RunsPage} />
+        <Route path="/" component={HomePage} />
+        <Route path="/runs" component={RunsPage} />
         <Route path="/runs/compare" component={ComparePage} />
         <Route path="/runs/:runId" component={RunPage} />
         <Route path="/jobs" component={JobsPage} />

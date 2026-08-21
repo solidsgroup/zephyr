@@ -8,6 +8,7 @@ import MetadataTable from "./components/MetadataTable";
 import { compactPathValues } from "./comparisonPaths";
 import PathTail from "./components/PathTail";
 import JobsPage from "./pages/JobsPage";
+import HomePage from "./pages/HomePage";
 import ProjectsPage from "./pages/ProjectsPage";
 import SettingsPage from "./pages/SettingsPage";
 import { ArtifactViewer, CopyLocations, MetadataDetailSection, SlurmDetails } from "./pages/RunPage";
@@ -209,6 +210,62 @@ describe("MetadataDetailSection", () => {
     expect(screen.getByText("Compiler").closest("tr")).toHaveTextContent("GNU 14.2");
     expect(screen.getByText("Dimension").closest("tr")).toHaveTextContent("3");
     expect(screen.queryByText("Complete")).not.toBeInTheDocument();
+  });
+});
+
+describe("HomePage", () => {
+  it("shows recent project tiles, active jobs, and uncategorized runs", async () => {
+    const olderProject = {
+      id: "older",
+      owner_id: "owner",
+      slug: "older-study",
+      name: "Older study",
+      description: "An earlier parameter sweep",
+      visibility: "private",
+      created_at: "2026-08-01T12:00:00Z",
+      updated_at: "2026-08-02T12:00:00Z",
+      last_modified_at: "2026-08-03T12:00:00Z",
+      run_count: 2,
+      active_run_count: 0,
+    };
+    const recentProject = {
+      ...olderProject,
+      id: "recent",
+      slug: "recent-study",
+      name: "Recent study",
+      description: "The current production campaign",
+      last_modified_at: "2026-08-20T12:00:00Z",
+      run_count: 5,
+      active_run_count: 1,
+    };
+    const running = { ...run("running", "Active simulation"), status: "running", effective_status: "running", progress: 42, scheduler_job_id: "481516", scheduler_details: { cluster: "stampede3", job_name: "active-job" } };
+    const inbox = { ...run("inbox", "Needs a project"), artifact_count: 0 };
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = String(request);
+      const body = url.includes("/projects/dashboard")
+        ? [olderProject, recentProject]
+        : url.includes("status=running")
+          ? [running]
+          : url.includes("status=starting")
+            ? []
+            : url.includes("uncategorized=true")
+              ? [inbox]
+              : [];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(<QueryClientProvider client={queryClient}><HomePage /></QueryClientProvider>);
+    const dashboard = within(view.container);
+
+    expect(await dashboard.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    const tiles = await dashboard.findAllByRole("link", { name: /study/i });
+    expect(tiles[0]).toHaveTextContent("Recent study");
+    expect(tiles[1]).toHaveTextContent("Older study");
+    expect(dashboard.getByText("active-job")).toBeInTheDocument();
+    expect(dashboard.getByText("42%")).toBeInTheDocument();
+    expect(dashboard.getByText("Needs a project")).toBeInTheDocument();
+    expect(dashboard.getByRole("link", { name: /Recent study/ })).toHaveAttribute("href", "/projects/recent-study");
   });
 });
 
