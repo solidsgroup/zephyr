@@ -455,6 +455,61 @@ describe("RunBrowser", () => {
 });
 
 describe("ProjectsPage", () => {
+  it("opens on a visual gallery and starts the runs view with folders collapsed", async () => {
+    const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
+    const projectRun = { ...run("simulation", "Simulation one"), artifact_count: 1 };
+    const gallery = [{
+      id: "image",
+      logical_name: "density.png",
+      path: "plots/density.png",
+      kind: "image",
+      content_type: "image/png",
+      download_url: "/api/v1/runs/simulation/artifacts/image/content",
+      run_id: "simulation",
+      run_name: "Simulation one",
+      is_thumbnail: true,
+      updated_at: "2026-08-03T20:00:00Z",
+    }];
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = String(request);
+      let body: unknown = [];
+      if (url.includes("/auth/me")) {
+        body = { user: { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null }, csrf_token: "csrf" };
+      } else if (url.endsWith("/projects/project/gallery")) {
+        body = gallery;
+      } else if (url.endsWith("/projects/project/layout")) {
+        body = { folders: [{ id: "cases", project_id: "project", parent_id: null, name: "Cases", position: 0 }], runs: [{ run: projectRun, folder_id: "cases", position: 0 }] };
+      } else if (url.includes("/runs/simulation")) {
+        body = { run: projectRun, metadata: null, output: null, copies: [], thermo: [] };
+      } else if (url.includes("/projects")) {
+        body = [project];
+      }
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/projects/study");
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["me"], { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null });
+
+    const view = render(<QueryClientProvider client={queryClient}><ProjectsPage /></QueryClientProvider>);
+    const page = within(view.container);
+    expect(await page.findByRole("img", { name: "density.png" })).toBeInTheDocument();
+    expect(page.getByRole("link", { name: "Gallery" })).toHaveAttribute("aria-current", "page");
+    expect(page.getByRole("link", { name: /density.png/ })).toHaveAttribute("href", "/projects/study/runs/simulation");
+
+    fireEvent.click(page.getByRole("link", { name: "Runs" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/study/runs"));
+    const cases = (await page.findByText("Cases")).closest("button")!;
+    await waitFor(() => expect(cases).toHaveAttribute("aria-expanded", "false"));
+    expect(page.queryByText("Simulation one")).not.toBeInTheDocument();
+    expect(page.getByRole("heading", { name: "Select a run" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("zephyr:collapsed-project-folders:v2:project")).toBe(JSON.stringify(["cases"]));
+
+    fireEvent.click(cases);
+    fireEvent.click(await page.findByRole("button", { name: /Simulation one/ }));
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/study/runs/simulation"));
+  });
+
   it("shows the full record, selects ranges, and moves a run by drag and drop", async () => {
     const project = { id: "project", owner_id: "owner", slug: "study", name: "Study", description: "Project data", visibility: "private" };
     const otherProject = { id: "other-project", owner_id: "owner", slug: "other-study", name: "Other study", description: "More data", visibility: "private" };
@@ -493,6 +548,8 @@ describe("ProjectsPage", () => {
         body = { folders: [], runs: [{ run: otherRun, folder_id: null, position: 0 }] };
       } else if (url.includes("/projects/project/layout")) {
         body = layout;
+      } else if (url.includes("/projects/other-project/gallery") || url.includes("/projects/project/gallery")) {
+        body = [];
       } else if (url.includes("/projects")) {
         body = [project, otherProject];
       } else if (url.includes("/runs?") && url.includes("search=")) {
@@ -507,7 +564,7 @@ describe("ProjectsPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/projects/study/runs/simulation-two");
-    window.localStorage.setItem("zephyr:collapsed-project-folders:project", JSON.stringify(["cases"]));
+    window.localStorage.setItem("zephyr:collapsed-project-folders:v2:project", JSON.stringify(["cases"]));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(["me"], { id: "owner", email: "owner@solids.group", name: "Owner", picture_url: null });
 
@@ -521,7 +578,7 @@ describe("ProjectsPage", () => {
     expect(page.queryByText("GPU")).not.toBeInTheDocument();
     fireEvent.click(casesButton);
     expect(page.getByText("GPU")).toBeInTheDocument();
-    await waitFor(() => expect(window.localStorage.getItem("zephyr:collapsed-project-folders:project")).toBe("[]"));
+    await waitFor(() => expect(window.localStorage.getItem("zephyr:collapsed-project-folders:v2:project")).toBe("[]"));
 
     const runRows = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".project-run-row"));
     fireEvent.click(runRows[0]);
@@ -586,8 +643,8 @@ describe("ProjectsPage", () => {
     expect(page.getByText("1 of 3 runs")).toBeInTheDocument();
 
     fireEvent.change(page.getByLabelText("Select project"), { target: { value: "other-project" } });
-    await waitFor(() => expect(window.location.pathname).toBe("/projects/other-study/runs/other-simulation"));
-    expect(await page.findByText("Other simulation")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/other-study"));
+    expect(await page.findByRole("heading", { name: "No images or movies yet" })).toBeInTheDocument();
   });
 });
 

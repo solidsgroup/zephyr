@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEven
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api, currentUser } from "../api";
+import { isVideoContentType } from "../artifacts";
+import LazyVideo from "../components/LazyVideo";
 import { ArtifactStack } from "../components/RunBrowser";
 import PathTail from "../components/PathTail";
 import StatusPill from "../components/StatusPill";
@@ -11,6 +13,7 @@ import { RunRecord } from "./RunPage";
 import type {
   Project,
   ProjectFolder,
+  ProjectGalleryItem,
   ProjectLayout,
   ProjectRunPlacement,
   Run,
@@ -26,7 +29,7 @@ interface Member {
 
 const ROOT = "__project_root__";
 const EMPTY_RUN_IDS = new Set<string>();
-const COLLAPSED_FOLDERS_KEY = "zephyr:collapsed-project-folders";
+const COLLAPSED_FOLDERS_KEY = "zephyr:collapsed-project-folders:v2";
 
 type RunInventorySort = "position" | "copies_desc" | "copies_asc" | "artifacts_desc" | "artifacts_asc";
 
@@ -43,16 +46,21 @@ function projectPath(project: Project, runId?: string | null) {
   return runId ? `${base}/runs/${encodeURIComponent(runId)}` : base;
 }
 
+function projectRunsPath(project: Project) {
+  return `${projectPath(project)}/runs`;
+}
+
 function projectSelectionFromLocation(location: string) {
-  const match = location.match(/^\/projects\/([^/]+)(?:\/runs\/([^/]+))?\/?$/);
-  if (!match) return { projectSlug: null, runId: null };
+  const match = location.match(/^\/projects\/([^/]+)(?:\/(gallery|runs)(?:\/([^/]+))?)?\/?$/);
+  if (!match) return { projectSlug: null, view: "gallery" as const, runId: null };
   try {
     return {
       projectSlug: decodeURIComponent(match[1]),
-      runId: match[2] ? decodeURIComponent(match[2]) : null,
+      view: match[2] === "runs" ? "runs" as const : "gallery" as const,
+      runId: match[2] === "runs" && match[3] ? decodeURIComponent(match[3]) : null,
     };
   } catch {
-    return { projectSlug: null, runId: null };
+    return { projectSlug: null, view: "gallery" as const, runId: null };
   }
 }
 
@@ -62,10 +70,12 @@ function collapsedFoldersKey(projectId: string) {
 
 function storedCollapsedFolders(projectId: string) {
   try {
-    const value = JSON.parse(window.localStorage.getItem(collapsedFoldersKey(projectId)) ?? "[]");
+    const stored = window.localStorage.getItem(collapsedFoldersKey(projectId));
+    if (stored === null) return null;
+    const value = JSON.parse(stored);
     return new Set<string>(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
   } catch {
-    return new Set<string>();
+    return null;
   }
 }
 
@@ -274,6 +284,39 @@ function ProjectSettings({ project, owner, onDeleted }: { project: Project; owne
   );
 }
 
+function ProjectGallery({ project }: { project: Project }) {
+  const gallery = useQuery({
+    queryKey: ["project-gallery", project.id],
+    queryFn: ({ signal }) => api<ProjectGalleryItem[]>(`/projects/${project.id}/gallery`, { signal }),
+  });
+  const runCount = new Set((gallery.data ?? []).map((item) => item.run_id)).size;
+
+  if (gallery.isPending) return <div className="workspace-state"><span className="spinner" />Loading project gallery…</div>;
+  if (gallery.isError) return <div className="workspace-state error-text">Could not load this project gallery.</div>;
+  return (
+    <main className="project-gallery-view">
+      <header className="project-gallery-heading">
+        <div><p className="eyebrow">VISUAL OUTPUTS</p><h1>{project.name}</h1><p>{project.description || "Images and movies collected from this project."}</p></div>
+        <span>{gallery.data.length} {gallery.data.length === 1 ? "visual" : "visuals"} · {runCount} {runCount === 1 ? "run" : "runs"}</span>
+      </header>
+      {gallery.data.length ? <div className="project-gallery-grid">
+        {gallery.data.map((item) => (
+          <Link className="project-gallery-card" href={projectPath(project, item.run_id)} key={item.id}>
+            <div className="project-gallery-media">
+              {isVideoContentType(item.content_type)
+                ? <LazyVideo src={item.download_url!} label={item.logical_name} />
+                : <img loading="lazy" src={item.download_url!} alt={item.logical_name} />}
+              {item.is_thumbnail && <span className="project-gallery-featured">Run thumbnail</span>}
+              {isVideoContentType(item.content_type) && <span className="project-gallery-movie">▶ Movie</span>}
+            </div>
+            <span className="project-gallery-caption"><strong title={item.logical_name}>{item.logical_name}</strong><small title={item.run_name}>{item.run_name}</small></span>
+          </Link>
+        ))}
+      </div> : <div className="project-gallery-empty"><span>◇</span><h2>No images or movies yet</h2><p>Add visual artifacts to a project run and they will appear here.</p><Link className="button" href={projectRunsPath(project)}>Open runs</Link></div>}
+    </main>
+  );
+}
+
 function ProjectWorkspace({
   project,
   canEdit,
@@ -299,7 +342,10 @@ function ProjectWorkspace({
   const [copies, setCopies] = useState("");
   const [artifacts, setArtifacts] = useState("");
   const [sort, setSort] = useState<RunInventorySort>("position");
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => storedCollapsedFolders(project.id));
+  const initialCollapsed = useRef<Set<string> | null | undefined>(undefined);
+  if (initialCollapsed.current === undefined) initialCollapsed.current = storedCollapsedFolders(project.id);
+  const collapseInitialized = useRef(initialCollapsed.current !== null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => initialCollapsed.current ?? new Set());
   const [draggedRunIds, setDraggedRunIds] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showAddRun, setShowAddRun] = useState(false);
@@ -323,7 +369,17 @@ function ProjectWorkspace({
     const timer = window.setTimeout(() => setSearchQuery(search.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [search]);
-  useEffect(() => storeCollapsedFolders(project.id, collapsed), [collapsed, project.id]);
+  useEffect(() => {
+    if (!layout.isSuccess) return;
+    if (!collapseInitialized.current) {
+      const defaults = new Set(layout.data.folders.map((folder) => folder.id));
+      collapseInitialized.current = true;
+      setCollapsed(defaults);
+      storeCollapsedFolders(project.id, defaults);
+      return;
+    }
+    storeCollapsedFolders(project.id, collapsed);
+  }, [collapsed, layout.data, layout.isSuccess, project.id]);
   useEffect(() => {
     if (selectedRunId) setShowSettings(false);
   }, [selectedRunId]);
@@ -431,14 +487,7 @@ function ProjectWorkspace({
   const effectiveCollapsed = searchQuery ? EMPTY_RUN_IDS : collapsed;
   const selectedPlacement = selectedRunId
     ? placements.find((placement) => placement.run.id === selectedRunId) ?? null
-    : placements[0] ?? null;
-  useEffect(() => {
-    if (layout.isSuccess && !showSettings && !selectedRunId && selectedPlacement) {
-      setSelectedRunIds(new Set([selectedPlacement.run.id]));
-      selectionAnchor.current = selectedPlacement.run.id;
-      onSelectRun(selectedPlacement.run.id, true);
-    }
-  }, [layout.isSuccess, onSelectRun, selectedPlacement, selectedRunId, showSettings]);
+    : null;
   const visibleRunIds = useMemo(() => {
     const result: string[] = [];
     const visitFolder = (folder: ProjectFolder) => {
@@ -579,7 +628,7 @@ function ProjectWorkspace({
       </aside>
       <main className="project-data-main">
         <header className="project-data-heading"><div><p className="eyebrow">{project.visibility.toUpperCase()} PROJECT</p><h2>{project.name}</h2><p>{project.description || "Simulation workspace"}</p></div>{project.visibility === "public" && <a href={`/public/${project.slug}`}>Public page ↗</a>}</header>
-        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedIds.length > 1 ? <RunComparison ids={selectedIds} embedded /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : selectedRunId && layout.isSuccess ? <div className="project-main-empty"><span>⌁</span><h1>Run not in this project</h1><p>This project permalink no longer points to an available run.</p></div> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
+        {showSettings ? <ProjectSettings project={project} owner={me.data?.id === project.owner_id} onDeleted={onDeleted} /> : selectedIds.length > 1 ? <RunComparison ids={selectedIds} embedded /> : selectedPlacement ? <RunRecord key={selectedPlacement.run.id} runId={selectedPlacement.run.id} embedded /> : selectedRunId && layout.isSuccess ? <div className="project-main-empty"><span>⌁</span><h1>Run not in this project</h1><p>This project permalink no longer points to an available run.</p></div> : placements.length ? <div className="project-main-empty"><span>↖</span><h1>Select a run</h1><p>Choose a run from the project list to open its details.</p></div> : <div className="project-main-empty"><span>⌁</span><h1>Build this project</h1><p>Add a run from the sidebar, then drag it into folders as the study grows.</p></div>}
       </main>
     </div>
   );
@@ -623,10 +672,14 @@ export default function ProjectsPage() {
             if (project) navigate(projectPath(project));
           }}>{projects.data?.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select> : <h1>Projects</h1>}
         </div>
+        {selected && <nav className="project-view-tabs" aria-label="Project views">
+          <Link href={projectPath(selected)} aria-current={routeSelection.view === "gallery" ? "page" : undefined}>Gallery</Link>
+          <Link href={projectRunsPath(selected)} aria-current={routeSelection.view === "runs" ? "page" : undefined}>Runs</Link>
+        </nav>}
         <button onClick={() => setShowCreate(!showCreate)}>＋ New project</button>
       </header>
       {showCreate && <div className="project-create-bar"><label>Name<input autoFocus value={name} onChange={(event) => { const next = event.target.value; setName(next); setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")); }} /></label><label>URL slug<input value={slug} onChange={(event) => setSlug(event.target.value)} /></label><label>Visibility<select value={visibility} onChange={(event) => setVisibility(event.target.value as Project["visibility"])}><option value="private">Private</option><option value="group">Group</option><option value="public">Public</option></select></label><button onClick={() => setShowCreate(false)}>Cancel</button><button className="primary" disabled={!name || slug.length < 3 || create.isPending} onClick={() => create.mutate()}>Create project</button></div>}
-      {projects.isPending ? <div className="workspace-state"><span className="spinner" />Loading projects…</div> : routeSelection.projectSlug && !selected ? <div className="project-main-empty"><span>⌁</span><h1>Project not found</h1><p>This project permalink is unavailable or you no longer have access.</p></div> : selected ? <ProjectWorkspace key={selected.id} project={selected} canEdit={editableIds.has(selected.id)} selectedRunId={routeSelection.runId} onSelectRun={(runId, replace = false) => navigate(projectPath(selected, runId), { replace })} onDeleted={() => {
+      {projects.isPending ? <div className="workspace-state"><span className="spinner" />Loading projects…</div> : routeSelection.projectSlug && !selected ? <div className="project-main-empty"><span>⌁</span><h1>Project not found</h1><p>This project permalink is unavailable or you no longer have access.</p></div> : selected && routeSelection.view === "gallery" ? <ProjectGallery key={selected.id} project={selected} /> : selected ? <ProjectWorkspace key={selected.id} project={selected} canEdit={editableIds.has(selected.id)} selectedRunId={routeSelection.runId} onSelectRun={(runId, replace = false) => navigate(runId ? projectPath(selected, runId) : projectRunsPath(selected), { replace })} onDeleted={() => {
         queryClient.setQueryData<Project[]>(["projects"], (current) => current?.filter((project) => project.id !== selected.id));
         navigate("/projects", { replace: true });
       }} /> : <div className="project-main-empty"><span>⌁</span><h1>Create your first project</h1><p>Projects organize simulation records into a shared working space.</p></div>}

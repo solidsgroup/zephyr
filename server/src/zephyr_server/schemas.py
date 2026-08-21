@@ -327,6 +327,13 @@ class ProjectDashboardRead(ProjectRead):
     artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
 
 
+class ProjectGalleryItem(ArtifactPreview):
+    run_id: uuid.UUID
+    run_name: str
+    is_thumbnail: bool
+    updated_at: datetime
+
+
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None

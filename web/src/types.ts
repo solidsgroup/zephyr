@@ -150,6 +150,13 @@ export interface ProjectDashboard extends Project {
   artifact_previews: ArtifactPreview[];
 }
 
+export interface ProjectGalleryItem extends ArtifactPreview {
+  run_id: string;
+  run_name: string;
+  is_thumbnail: boolean;
+  updated_at: string;
+}
+
 export interface ProjectFolder {
   id: string;
   project_id: string;

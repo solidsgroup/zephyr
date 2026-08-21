@@ -28,6 +28,7 @@ from ..schemas import (
     ProjectFolderCreate,
     ProjectFolderRead,
     ProjectFolderUpdate,
+    ProjectGalleryItem,
     ProjectLayoutRead,
     ProjectMemberAdd,
     ProjectMemberRead,
@@ -287,6 +288,61 @@ async def project_dashboard(
             artifact_previews=thumbnails_by_project[project.id],
         )
         for project, run_count, active_run_count, last_modified_at in rows
+    ]
+
+
+@router.get("/{project_id}/gallery", response_model=list[ProjectGalleryItem])
+async def project_gallery(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProjectGalleryItem]:
+    project = await accessible_project(db, user, project_id)
+    is_selected = Run.thumbnail_artifact_id == RunArtifact.id
+    is_visual = or_(
+        func.lower(ArtifactObject.content_type).like("image/%"),
+        func.lower(ArtifactObject.content_type).like("video/%"),
+    )
+    preferred_versions = (
+        select(
+            RunArtifact.id.label("artifact_id"),
+            func.row_number()
+            .over(
+                partition_by=(RunArtifact.run_id, RunArtifact.path),
+                order_by=(case((is_selected, 0), else_=1), RunArtifact.version.desc()),
+            )
+            .label("rank"),
+        )
+        .join(Run, Run.id == RunArtifact.run_id)
+        .join(RunProject, RunProject.run_id == Run.id)
+        .join(ArtifactObject, ArtifactObject.sha256 == RunArtifact.object_sha256)
+        .where(RunProject.project_id == project.id, is_visual)
+        .subquery()
+    )
+    selected_artifact = Run.thumbnail_artifact_id == RunArtifact.id
+    rows = (
+        await db.execute(
+            select(RunArtifact, Run.name, selected_artifact.label("is_thumbnail"))
+            .join(preferred_versions, preferred_versions.c.artifact_id == RunArtifact.id)
+            .join(Run, Run.id == RunArtifact.run_id)
+            .where(preferred_versions.c.rank == 1)
+            .options(selectinload(RunArtifact.object))
+            .order_by(
+                case((selected_artifact, 0), else_=1),
+                RunArtifact.updated_at.desc(),
+            )
+            .limit(500)
+        )
+    ).all()
+    return [
+        ProjectGalleryItem(
+            **artifact_preview(record).model_dump(),
+            run_id=record.run_id,
+            run_name=run_name,
+            is_thumbnail=bool(is_thumbnail),
+            updated_at=record.updated_at,
+        )
+        for record, run_name, is_thumbnail in rows
     ]
 
 

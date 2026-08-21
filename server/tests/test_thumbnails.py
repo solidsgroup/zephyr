@@ -158,6 +158,13 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
             assert all(
                 preview["download_url"] for preview in dashboard_project["artifact_previews"]
             )
+            gallery = await client.get(f"/api/v1/projects/{project_id}/gallery")
+            assert gallery.status_code == 200
+            assert len(gallery.json()) == 4
+            assert gallery.json()[0]["id"] == webm_id
+            assert gallery.json()[0]["run_id"] == str(run_id)
+            assert gallery.json()[0]["is_thumbnail"] is True
+            assert latest_temperature_id in {item["id"] for item in gallery.json()}
             deleted_extra = await client.delete(
                 f"/api/v1/runs/{extra_run_id}", headers=headers
             )
