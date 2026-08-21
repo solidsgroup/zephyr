@@ -55,11 +55,15 @@ from ..search import refresh_run_search_document, refresh_run_search_documents
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
+HEARTBEAT_GRACE = timedelta(seconds=60)
+
 
 def effective_status(run: Run) -> str:
-    if run.status in {"starting", "running"} and run.last_heartbeat:
-        if utcnow() - ensure_utc(run.last_heartbeat) > timedelta(minutes=2):
-            return "unreachable"
+    if run.status in {"starting", "running"} and (
+        run.last_heartbeat is None
+        or utcnow() - ensure_utc(run.last_heartbeat) > HEARTBEAT_GRACE
+    ):
+        return "unreachable"
     return run.status
 
 
@@ -291,18 +295,18 @@ async def list_runs(
             )
         )
     if status_filter:
-        stale_before = utcnow() - timedelta(minutes=2)
+        stale_before = utcnow() - HEARTBEAT_GRACE
         stale_heartbeat = and_(
             Run.status.in_({"starting", "running"}),
-            Run.last_heartbeat.is_not(None),
-            Run.last_heartbeat < stale_before,
+            or_(Run.last_heartbeat.is_(None), Run.last_heartbeat < stale_before),
         )
         if status_filter == "unreachable":
             query = query.where(or_(Run.status == "unreachable", stale_heartbeat))
         elif status_filter in {"starting", "running"}:
             query = query.where(
                 Run.status == status_filter,
-                or_(Run.last_heartbeat.is_(None), Run.last_heartbeat >= stale_before),
+                Run.last_heartbeat.is_not(None),
+                Run.last_heartbeat >= stale_before,
             )
         else:
             query = query.where(Run.status == status_filter)

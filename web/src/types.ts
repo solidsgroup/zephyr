@@ -139,6 +139,7 @@ export interface ProjectDashboard extends Project {
   last_modified_at: string;
   run_count: number;
   active_run_count: number;
+  artifact_previews: ArtifactPreview[];
 }
 
 export interface ProjectFolder {

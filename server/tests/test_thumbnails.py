@@ -83,6 +83,28 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
             assert selected_webm.status_code == 200
             assert selected_webm.json()["thumbnail_artifact_id"] == webm_id
 
+            project = await client.post(
+                "/api/v1/projects",
+                json={"slug": f"previews-{uuid.uuid4()}", "name": "Preview project"},
+                headers=headers,
+            )
+            project_id = project.json()["id"]
+            added = await client.post(
+                f"/api/v1/projects/{project_id}/runs",
+                json={"run_id": str(run_id)},
+                headers=headers,
+            )
+            assert added.status_code == 204
+            dashboard = await client.get("/api/v1/projects/dashboard")
+            dashboard_project = next(
+                item for item in dashboard.json() if item["id"] == project_id
+            )
+            assert len(dashboard_project["artifact_previews"]) == 3
+            assert dashboard_project["artifact_previews"][0]["id"] == webm_id
+            assert all(
+                preview["download_url"] for preview in dashboard_project["artifact_previews"]
+            )
+
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))
             assert listed["artifact_count"] == 4
@@ -135,6 +157,11 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 headers=headers,
             )
             assert rejected.status_code == 422
+
+            deleted_project = await client.delete(
+                f"/api/v1/projects/{project_id}", headers=headers
+            )
+            assert deleted_project.status_code == 204
 
             deleted = await client.delete(f"/api/v1/runs/{run_id}", headers=headers)
             assert deleted.status_code == 204

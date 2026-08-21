@@ -316,6 +316,7 @@ class ProjectDashboardRead(ProjectRead):
     last_modified_at: datetime
     run_count: int
     active_run_count: int
+    artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
 
 
 class ProjectUpdate(BaseModel):

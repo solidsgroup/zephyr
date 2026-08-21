@@ -237,6 +237,14 @@ describe("HomePage", () => {
       last_modified_at: "2026-08-20T12:00:00Z",
       run_count: 5,
       active_run_count: 1,
+      artifact_previews: [{
+        id: "preview",
+        logical_name: "density.png",
+        path: "plots/density.png",
+        kind: "image",
+        content_type: "image/png",
+        download_url: "/api/v1/runs/run/artifacts/preview/content",
+      }],
     };
     const running = { ...run("running", "Active simulation"), status: "running", effective_status: "running", progress: 42, scheduler_job_id: "481516", scheduler_details: { cluster: "stampede3", job_name: "active-job" } };
     const inbox = { ...run("inbox", "Needs a project"), artifact_count: 0 };
@@ -265,6 +273,8 @@ describe("HomePage", () => {
     expect(dashboard.getByText("active-job")).toBeInTheDocument();
     expect(dashboard.getByText("42%")).toBeInTheDocument();
     expect(dashboard.getByText("Needs a project")).toBeInTheDocument();
+    expect(dashboard.getByRole("img", { name: "density.png" })).toBeInTheDocument();
+    expect(dashboard.queryByText("Simulation project")).not.toBeInTheDocument();
     expect(dashboard.getByRole("link", { name: /Recent study/ })).toHaveAttribute("href", "/projects/recent-study");
   });
 });
@@ -647,6 +657,14 @@ describe("JobsPage", () => {
     expect(await screen.findByRole("heading", { name: "On lonestar6 now" })).toBeInTheDocument();
     const arrival = await screen.findByRole("link", { name: /Packing study/ });
     expect(arrival.closest(".job-record")).toHaveAttribute("data-new", "true");
+
+    act(() => queryClient.setQueryData(
+      ["runs", "slurm-jobs"],
+      [{ ...second, effective_status: "unreachable" }, first],
+    ));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "On lonestar6 now" })).not.toBeInTheDocument());
+    const summary = screen.getByLabelText("SLURM job summary");
+    expect(within(summary).getByText("Unreachable").parentElement).toHaveTextContent("1");
   });
 });
 

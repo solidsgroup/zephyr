@@ -1,12 +1,13 @@
 import hashlib
 import uuid
+from datetime import timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from zephyr_server.db import SessionLocal
 from zephyr_server.main import app
-from zephyr_server.models import Run
+from zephyr_server.models import Run, utcnow
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,6 +56,7 @@ async def test_run_lifecycle_and_public_project() -> None:
             )
             assert created.status_code == 201
             run_id = created.json()["id"]
+            assert created.json()["effective_status"] == "unreachable"
             assert created.json()["scheduler_details"]["partition"] == "gpu-a100"
             assert created.json()["output_path"] == "/work/alamo/output.481516"
             searched = await client.get("/api/v1/runs?search=output.481516")
@@ -327,8 +329,23 @@ async def test_run_lifecycle_and_public_project() -> None:
                 item for item in dashboard.json() if item["id"] == project_id
             )
             assert dashboard_project["run_count"] == 2
-            assert dashboard_project["active_run_count"] == 2
+            assert dashboard_project["active_run_count"] == 1
+            assert dashboard_project["artifact_previews"] == []
             assert dashboard_project["last_modified_at"]
+            async with SessionLocal() as db:
+                stale_run = await db.get(Run, uuid.UUID(run_id))
+                assert stale_run is not None
+                stale_run.last_heartbeat = utcnow() - timedelta(seconds=61)
+                await db.commit()
+            stale_dashboard = await client.get("/api/v1/projects/dashboard")
+            stale_project = next(
+                item for item in stale_dashboard.json() if item["id"] == project_id
+            )
+            assert stale_project["active_run_count"] == 0
+            fresh_running = await client.get("/api/v1/runs", params={"status": "running"})
+            assert run_id not in {item["id"] for item in fresh_running.json()}
+            unreachable = await client.get("/api/v1/runs", params={"status": "unreachable"})
+            assert run_id in {item["id"] for item in unreachable.json()}
             comparison = await client.get(
                 "/api/v1/comparisons/runs",
                 params=[("ids", run_id), ("ids", batch_run_id)],

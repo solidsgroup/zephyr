@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
@@ -12,6 +11,7 @@ from ..db import get_db
 from ..dependencies import current_user
 from ..models import Project, ProjectFolder, ProjectMembership, Run, RunProject, User, utcnow
 from ..schemas import (
+    ArtifactPreview,
     ProjectCreate,
     ProjectDashboardRead,
     ProjectFolderCreate,
@@ -29,7 +29,7 @@ from ..schemas import (
     ProjectRunPlacementWrite,
     ProjectUpdate,
 )
-from .runs import artifact_previews_for_runs, copy_counts_for_runs, run_read
+from .runs import HEARTBEAT_GRACE, artifact_previews_for_runs, copy_counts_for_runs, run_read
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -147,10 +147,11 @@ async def project_dashboard(
         Project.visibility.in_({"group", "public"}),
         Project.id.in_(member_projects),
     )
-    stale_before = utcnow() - timedelta(minutes=2)
-    active_run = Run.status.in_({"starting", "running"}) & or_(
-        Run.last_heartbeat.is_(None),
-        Run.last_heartbeat >= stale_before,
+    stale_before = utcnow() - HEARTBEAT_GRACE
+    active_run = (
+        Run.status.in_({"starting", "running"})
+        & Run.last_heartbeat.is_not(None)
+        & (Run.last_heartbeat >= stale_before)
     )
     activity = (
         select(
@@ -181,6 +182,43 @@ async def project_dashboard(
             .order_by(last_modified.desc(), Project.name)
         )
     ).all()
+
+    project_ids = [project.id for project, *_ in rows]
+    thumbnails_by_project: dict[uuid.UUID, list[ArtifactPreview]] = {
+        project_id: [] for project_id in project_ids
+    }
+    if project_ids:
+        ranked_runs = (
+            select(
+                RunProject.project_id.label("project_id"),
+                RunProject.run_id.label("run_id"),
+                func.row_number()
+                .over(partition_by=RunProject.project_id, order_by=Run.updated_at.desc())
+                .label("rank"),
+            )
+            .join(Run, Run.id == RunProject.run_id)
+            .where(RunProject.project_id.in_(project_ids))
+            .subquery()
+        )
+        recent_rows = (
+            await db.execute(
+                select(ranked_runs.c.project_id, Run)
+                .join(Run, Run.id == ranked_runs.c.run_id)
+                .where(ranked_runs.c.rank <= 12)
+                .order_by(ranked_runs.c.project_id, ranked_runs.c.rank)
+            )
+        ).all()
+        recent_runs = list({run.id: run for _, run in recent_rows}.values())
+        previews = await artifact_previews_for_runs(db, recent_runs)
+        for project_id, run in recent_rows:
+            selected = thumbnails_by_project[project_id]
+            selected_ids = {item.id for item in selected}
+            for preview in previews.get(run.id, (0, []))[1]:
+                if preview.download_url and preview.id not in selected_ids:
+                    selected.append(preview)
+                    selected_ids.add(preview.id)
+                if len(selected) == 3:
+                    break
     return [
         ProjectDashboardRead(
             id=project.id,
@@ -194,6 +232,7 @@ async def project_dashboard(
             last_modified_at=last_modified_at,
             run_count=run_count,
             active_run_count=active_run_count,
+            artifact_previews=thumbnails_by_project[project.id],
         )
         for project, run_count, active_run_count, last_modified_at in rows
     ]

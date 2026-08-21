@@ -8,7 +8,7 @@ import StatusPill from "../components/StatusPill";
 import { alamoOutputDirectory, slurmGpuCount, slurmJobId } from "../slurm";
 import type { Run, RunDetail } from "../types";
 
-const ACTIVE_STATUSES = new Set(["starting", "running", "unreachable"]);
+const ACTIVE_STATUSES = new Set(["starting", "running"]);
 
 function timestamp(value: string | null) {
   if (!value) return "Not reported";
@@ -166,7 +166,7 @@ export default function JobsPage() {
 
   const runningCount = activeJobs.filter((run) => run.effective_status === "running").length;
   const startingCount = activeJobs.filter((run) => run.effective_status === "starting").length;
-  const unreachableCount = activeJobs.filter((run) => run.effective_status === "unreachable").length;
+  const unreachableCount = jobs.filter((run) => run.effective_status === "unreachable").length;
 
   if (runs.isPending) return <div className="center-state"><span className="spinner" />Opening SLURM monitor…</div>;
   if (runs.isError) return <div className="error-panel">The SLURM job monitor could not be loaded.</div>;

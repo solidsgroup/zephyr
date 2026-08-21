@@ -2,6 +2,8 @@ import { useMemo, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api } from "../api";
+import { isVideoContentType } from "../artifacts";
+import LazyVideo from "../components/LazyVideo";
 import { ArtifactStack } from "../components/RunBrowser";
 import StatusPill from "../components/StatusPill";
 import type { ProjectDashboard, Run } from "../types";
@@ -24,6 +26,24 @@ function projectHue(project: ProjectDashboard) {
   const hues = [216, 258, 184, 28, 332];
   const index = [...project.slug].reduce((total, character) => total + character.charCodeAt(0), 0) % hues.length;
   return hues[index];
+}
+
+function ProjectPreviews({ project }: { project: ProjectDashboard }) {
+  const previews = project.artifact_previews ?? [];
+  if (!previews.length) {
+    return <div className="dashboard-project-previews empty" aria-label="No project previews"><span>◇</span></div>;
+  }
+  return (
+    <div className="dashboard-project-previews" data-count={previews.length}>
+      {previews.map((artifact) => (
+        <div className="dashboard-project-preview" title={artifact.logical_name} key={artifact.id}>
+          {isVideoContentType(artifact.content_type)
+            ? <LazyVideo src={artifact.download_url!} label={artifact.logical_name} />
+            : <img loading="lazy" src={artifact.download_url!} alt={artifact.logical_name} />}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function HomePage() {
@@ -81,7 +101,8 @@ export default function HomePage() {
                   <span className="dashboard-project-mark">{projectInitials(project.name)}</span>
                   <span className="dashboard-visibility">{project.visibility}</span>
                 </div>
-                <div className="dashboard-project-copy"><h3>{project.name}</h3><p>{project.description || "Simulation project"}</p></div>
+                <div className="dashboard-project-copy"><h3>{project.name}</h3></div>
+                <ProjectPreviews project={project} />
                 <div className="dashboard-project-stats">
                   <span><strong>{project.run_count}</strong>{project.run_count === 1 ? "run" : "runs"}</span>
                   {project.active_run_count > 0 && <span className="dashboard-project-active"><i />{project.active_run_count} active</span>}
