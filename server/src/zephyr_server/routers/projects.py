@@ -212,6 +212,8 @@ async def project_dashboard(
         previews = await artifact_previews_for_runs(db, recent_runs)
         for project_id, run in recent_rows:
             selected = thumbnails_by_project[project_id]
+            if len(selected) >= 3:
+                continue
             selected_ids = {item.id for item in selected}
             for preview in previews.get(run.id, (0, []))[1]:
                 if preview.download_url and preview.id not in selected_ids:

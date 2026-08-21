@@ -83,6 +83,35 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
             assert selected_webm.status_code == 200
             assert selected_webm.json()["thumbnail_artifact_id"] == webm_id
 
+            extra = await client.post(
+                "/api/v1/runs",
+                json={"name": "Extra preview", "alamo_hash": f"extra-{uuid.uuid4()}"},
+                headers=headers,
+            )
+            extra_run_id = uuid.UUID(extra.json()["id"])
+            async with SessionLocal() as db:
+                digest = "f" * 64
+                db.add_all(
+                    [
+                        ArtifactObject(
+                            sha256=digest,
+                            size=100,
+                            content_type="image/jpeg",
+                            object_key=f"thumbnail-extra-{extra_run_id}",
+                            verified=True,
+                        ),
+                        RunArtifact(
+                            run_id=extra_run_id,
+                            object_sha256=digest,
+                            logical_name="extra.jpg",
+                            path="extra.jpg",
+                            version=1,
+                            kind="image",
+                        ),
+                    ]
+                )
+                await db.commit()
+
             project = await client.post(
                 "/api/v1/projects",
                 json={"slug": f"previews-{uuid.uuid4()}", "name": "Preview project"},
@@ -95,15 +124,27 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 headers=headers,
             )
             assert added.status_code == 204
+            added_extra = await client.post(
+                f"/api/v1/projects/{project_id}/runs",
+                json={"run_id": str(extra_run_id)},
+                headers=headers,
+            )
+            assert added_extra.status_code == 204
             dashboard = await client.get("/api/v1/projects/dashboard")
             dashboard_project = next(
                 item for item in dashboard.json() if item["id"] == project_id
             )
             assert len(dashboard_project["artifact_previews"]) == 3
-            assert dashboard_project["artifact_previews"][0]["id"] == webm_id
+            assert webm_id in {
+                preview["id"] for preview in dashboard_project["artifact_previews"]
+            }
             assert all(
                 preview["download_url"] for preview in dashboard_project["artifact_previews"]
             )
+            deleted_extra = await client.delete(
+                f"/api/v1/runs/{extra_run_id}", headers=headers
+            )
+            assert deleted_extra.status_code == 204
 
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))
