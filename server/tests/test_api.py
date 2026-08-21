@@ -319,6 +319,14 @@ async def test_run_lifecycle_and_public_project() -> None:
                 "/api/v1/runs", params={"uncategorized": "true"}
             )
             assert batch_run_id not in {item["id"] for item in uncategorized_after_add.json()}
+            categorized_listing = await client.get("/api/v1/runs")
+            categorized_run = next(
+                item for item in categorized_listing.json() if item["id"] == batch_run_id
+            )
+            assert categorized_run["projects"] == [
+                {"id": project_id, "slug": "rm-study", "name": "RM Study"}
+            ]
+            assert all(not item["projects"] for item in uncategorized_after_add.json())
             project_runs = await client.get(f"/api/v1/projects/{project_id}/runs")
             assert {item["id"] for item in project_runs.json()} == {run_id, batch_run_id}
             project_run = next(item for item in project_runs.json() if item["id"] == run_id)

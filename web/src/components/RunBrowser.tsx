@@ -147,7 +147,10 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
     queryFn: ({ signal }) => api<RunFacets>("/runs/facets", { signal }),
     refetchInterval: 60_000,
   });
-  const data = useMemo(() => runs.data ?? [], [runs.data]);
+  const data = useMemo(
+    () => (runs.data ?? []).filter((run) => !uncategorized || !(run.projects?.length ?? 0)),
+    [runs.data, uncategorized],
+  );
   const sites = facets.data?.sites ?? [];
   const selectedIds = useMemo(() => Object.keys(selected).filter((id) => selected[id]), [selected]);
   useEffect(() => {
@@ -352,6 +355,10 @@ export default function RunBrowser({ open, onClose }: { open: boolean; onClose: 
                   <div className="run-artifact-slot"><ArtifactStack run={run} /></div>
                   <div className="run-browser-copy">
                     <div><strong title={run.name}>{run.name}</strong><StatusPill status={run.effective_status} /></div>
+                    {!!run.projects?.length && <div className="run-project-badges" aria-label={`Projects for ${run.name}`}>
+                      {run.projects.slice(0, 2).map((project) => <span title={`Project: ${project.name}`} key={project.id}>{project.name}</span>)}
+                      {run.projects.length > 2 && <span title={run.projects.slice(2).map((project) => project.name).join(", ")}>+{run.projects.length - 2}</span>}
+                    </div>}
                     <small>{run.host ?? "Unknown host"}<span>·</span>{age(run.last_heartbeat)}<span>·</span>{run.copy_count} {run.copy_count === 1 ? "copy" : "copies"}<span>·</span>{run.artifact_count} {run.artifact_count === 1 ? "artifact" : "artifacts"}</small>
                     {run.progress != null && <span className="run-browser-progress"><i style={{ width: `${run.progress}%` }} /></span>}
                   </div>

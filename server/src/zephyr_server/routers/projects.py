@@ -3,13 +3,24 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..dependencies import current_user
-from ..models import Project, ProjectFolder, ProjectMembership, Run, RunProject, User, utcnow
+from ..models import (
+    ArtifactObject,
+    Project,
+    ProjectFolder,
+    ProjectMembership,
+    Run,
+    RunArtifact,
+    RunProject,
+    User,
+    utcnow,
+)
 from ..schemas import (
     ArtifactPreview,
     ProjectCreate,
@@ -29,7 +40,13 @@ from ..schemas import (
     ProjectRunPlacementWrite,
     ProjectUpdate,
 )
-from .runs import HEARTBEAT_GRACE, artifact_previews_for_runs, copy_counts_for_runs, run_read
+from .runs import (
+    HEARTBEAT_GRACE,
+    artifact_preview,
+    artifact_previews_for_runs,
+    copy_counts_for_runs,
+    run_read,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -188,39 +205,72 @@ async def project_dashboard(
         project_id: [] for project_id in project_ids
     }
     if project_ids:
-        ranked_runs = (
+        latest_versions = (
             select(
                 RunProject.project_id.label("project_id"),
-                RunProject.run_id.label("run_id"),
+                RunArtifact.run_id.label("run_id"),
+                RunArtifact.path.label("path"),
+                func.max(RunArtifact.version).label("version"),
+            )
+            .join(RunArtifact, RunArtifact.run_id == RunProject.run_id)
+            .where(RunProject.project_id.in_(project_ids))
+            .group_by(RunProject.project_id, RunArtifact.run_id, RunArtifact.path)
+            .subquery()
+        )
+        is_selected = Run.thumbnail_artifact_id == RunArtifact.id
+        is_current = and_(
+            RunArtifact.run_id == latest_versions.c.run_id,
+            RunArtifact.path == latest_versions.c.path,
+            RunArtifact.version == latest_versions.c.version,
+        )
+        is_image = func.lower(ArtifactObject.content_type).like("image/%")
+        candidates = (
+            select(
+                RunProject.project_id.label("project_id"),
+                RunArtifact.id.label("artifact_id"),
                 func.row_number()
-                .over(partition_by=RunProject.project_id, order_by=Run.updated_at.desc())
+                .over(
+                    partition_by=RunProject.project_id,
+                    order_by=(
+                        case((is_selected, 0), else_=1),
+                        case((is_image, 0), else_=1),
+                        RunArtifact.updated_at.desc(),
+                    ),
+                )
                 .label("rank"),
             )
             .join(Run, Run.id == RunProject.run_id)
-            .where(RunProject.project_id.in_(project_ids))
+            .join(RunArtifact, RunArtifact.run_id == Run.id)
+            .join(ArtifactObject, ArtifactObject.sha256 == RunArtifact.object_sha256)
+            .outerjoin(
+                latest_versions,
+                and_(
+                    latest_versions.c.project_id == RunProject.project_id,
+                    latest_versions.c.run_id == RunArtifact.run_id,
+                    latest_versions.c.path == RunArtifact.path,
+                ),
+            )
+            .where(
+                RunProject.project_id.in_(project_ids),
+                or_(
+                    func.lower(ArtifactObject.content_type).like("image/%"),
+                    func.lower(ArtifactObject.content_type).like("video/%"),
+                ),
+                or_(is_selected, is_current),
+            )
             .subquery()
         )
-        recent_rows = (
+        preview_rows = (
             await db.execute(
-                select(ranked_runs.c.project_id, Run)
-                .join(Run, Run.id == ranked_runs.c.run_id)
-                .where(ranked_runs.c.rank <= 12)
-                .order_by(ranked_runs.c.project_id, ranked_runs.c.rank)
+                select(candidates.c.project_id, RunArtifact)
+                .join(RunArtifact, RunArtifact.id == candidates.c.artifact_id)
+                .where(candidates.c.rank <= 3)
+                .options(selectinload(RunArtifact.object))
+                .order_by(candidates.c.project_id, candidates.c.rank)
             )
         ).all()
-        recent_runs = list({run.id: run for _, run in recent_rows}.values())
-        previews = await artifact_previews_for_runs(db, recent_runs)
-        for project_id, run in recent_rows:
-            selected = thumbnails_by_project[project_id]
-            if len(selected) >= 3:
-                continue
-            selected_ids = {item.id for item in selected}
-            for preview in previews.get(run.id, (0, []))[1]:
-                if preview.download_url and preview.id not in selected_ids:
-                    selected.append(preview)
-                    selected_ids.add(preview.id)
-                if len(selected) == 3:
-                    break
+        for project_id, record in preview_rows:
+            thumbnails_by_project[project_id].append(artifact_preview(record))
     return [
         ProjectDashboardRead(
             id=project.id,

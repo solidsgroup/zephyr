@@ -109,6 +109,12 @@ class ArtifactPreview(BaseModel):
     download_url: str | None = None
 
 
+class RunProjectBadge(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+
+
 class RunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -136,6 +142,7 @@ class RunRead(BaseModel):
     copy_count: int = 0
     artifact_count: int = 0
     artifact_previews: list[ArtifactPreview] = Field(default_factory=list)
+    projects: list[RunProjectBadge] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

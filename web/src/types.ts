@@ -40,8 +40,15 @@ export interface Run {
   copy_count: number;
   artifact_count: number;
   artifact_previews: ArtifactPreview[];
+  projects: RunProjectBadge[];
   created_at: string;
   updated_at: string;
+}
+
+export interface RunProjectBadge {
+  id: string;
+  slug: string;
+  name: string;
 }
 
 export interface RunFacets {

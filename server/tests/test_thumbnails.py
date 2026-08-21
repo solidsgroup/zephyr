@@ -130,6 +130,23 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 headers=headers,
             )
             assert added_extra.status_code == 204
+            filler_run_ids: list[str] = []
+            for index in range(12):
+                filler = await client.post(
+                    "/api/v1/runs",
+                    json={
+                        "name": f"Newer run without preview {index}",
+                        "alamo_hash": f"filler-{uuid.uuid4()}",
+                    },
+                    headers=headers,
+                )
+                filler_run_ids.append(filler.json()["id"])
+                filler_added = await client.post(
+                    f"/api/v1/projects/{project_id}/runs",
+                    json={"run_id": filler.json()["id"]},
+                    headers=headers,
+                )
+                assert filler_added.status_code == 204
             dashboard = await client.get("/api/v1/projects/dashboard")
             dashboard_project = next(
                 item for item in dashboard.json() if item["id"] == project_id
@@ -145,6 +162,11 @@ async def test_run_list_previews_and_selected_thumbnail() -> None:
                 f"/api/v1/runs/{extra_run_id}", headers=headers
             )
             assert deleted_extra.status_code == 204
+            for filler_run_id in filler_run_ids:
+                deleted_filler = await client.delete(
+                    f"/api/v1/runs/{filler_run_id}", headers=headers
+                )
+                assert deleted_filler.status_code == 204
 
             listing = await client.get("/api/v1/runs")
             listed = next(run for run in listing.json() if run["id"] == str(run_id))

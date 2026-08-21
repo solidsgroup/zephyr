@@ -50,6 +50,7 @@ function run(id: string, name: string): Run {
     copy_count: 0,
     artifact_count: 0,
     artifact_previews: [],
+    projects: [],
     created_at: "2026-08-03T20:00:00Z",
     updated_at: "2026-08-03T20:00:00Z",
   };
@@ -347,7 +348,10 @@ describe("RunBrowser", () => {
     const fetchMock = vi.fn((request: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify(
       String(request).includes("/runs/facets")
         ? { sites: [{ site: "stampede3", run_count: 4 }] }
-        : [run("one", "Run one")],
+        : [{
+          ...run("one", "Run one"),
+          projects: [{ id: "project", slug: "study", name: "Parameter study" }],
+        }],
     ), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -363,6 +367,7 @@ describe("RunBrowser", () => {
 
     const browser = within(view.container);
     await browser.findByRole("option", { name: "stampede3 (4)" });
+    expect(browser.getByTitle("Project: Parameter study")).toHaveTextContent("Parameter study");
     fireEvent.change(browser.getByLabelText("Search runs"), { target: { value: ".gif" } });
     fireEvent.change(browser.getByLabelText("Filter storage site"), { target: { value: "stampede3" } });
     fireEvent.change(browser.getByLabelText("Filter thumbnail"), { target: { value: "true" } });
@@ -383,6 +388,7 @@ describe("RunBrowser", () => {
         && url.includes("uncategorized=true"),
       )).toBe(true);
     });
+    expect(browser.getByText("No runs match this view.")).toBeInTheDocument();
   });
 
   it("creates projects and destination folders while adding a run", async () => {
